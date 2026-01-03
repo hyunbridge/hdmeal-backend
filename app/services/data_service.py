@@ -5,8 +5,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Dict, List, Optional
 
 from pymongo import ASCENDING, ReturnDocument
-from pymongo.asynchronous.collection import AsyncCollection
-from pymongo.asynchronous.database import AsyncDatabase
+from motor.motor_asyncio import AsyncIOMotorCollection, AsyncIOMotorDatabase
 
 from ..config import get_settings
 from ..schemas.data import (
@@ -41,14 +40,14 @@ class DataService:
     _indexes_ready: bool = False
     _index_lock: asyncio.Lock | None = None
 
-    def __init__(self, database: AsyncDatabase):
+    def __init__(self, database: AsyncIOMotorDatabase):
         self._db = database
-        self._meals: AsyncCollection = database["meals"]
-        self._schedules: AsyncCollection = database["schedules"]
-        self._timetables: AsyncCollection = database["timetables"]
-        self._weather: AsyncCollection = database["weather"]
-        self._water_temperature: AsyncCollection = database["water_temperatures"]
-        self._users: AsyncCollection = database["users"]
+        self._meals: AsyncIOMotorCollection = database["meals"]
+        self._schedules: AsyncIOMotorCollection = database["schedules"]
+        self._timetables: AsyncIOMotorCollection = database["timetables"]
+        self._weather: AsyncIOMotorCollection = database["weather"]
+        self._water_temperature: AsyncIOMotorCollection = database["water_temperatures"]
+        self._users: AsyncIOMotorCollection = database["users"]
         self._settings = get_settings()
 
     async def ensure_indexes(self) -> None:
