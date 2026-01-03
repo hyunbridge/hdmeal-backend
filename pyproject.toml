@@ -1,0 +1,30 @@
+[project]
+name = "hdmeal-backend"
+version = "0.1.0"
+description = "Unified FastAPI backend for HDMeal chatbot and mobile app"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "Hyungyo Seo"}, {name = "HDMeal Contributors"}]
+
+dependencies = [
+  "fastapi>=0.118.0",
+  "uvicorn[standard]>=0.37.0",
+  "pymongo>=4.15.1",
+  "httpx>=0.28.1",
+  "pydantic>=2.11.9",
+  "pydantic-settings>=2.11.0",
+  "python-dateutil>=2.8.2",
+  "Authlib>=1.6.4",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "ruff", "mypy"]
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"

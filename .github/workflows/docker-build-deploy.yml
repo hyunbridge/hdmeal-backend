@@ -1,0 +1,148 @@
+name: Build and Deploy
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'
+
+env:
+  REGISTRY: ghcr.io
+  CONTAINER_NAME: hdmeal-api
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    name: Build and Push
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set image name
+        run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}/hdmeal-backend" >>"$GITHUB_ENV"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64,linux/arm64
+
+  deploy:
+    name: Deploy via SSH
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Set image name
+        run: echo "IMAGE_NAME=${GITHUB_REPOSITORY,,}/hdmeal-backend" >>"$GITHUB_ENV"
+
+      - name: Deploy to server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USERNAME }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          script: |
+            set -eu
+
+            IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+            NAME="${{ env.CONTAINER_NAME }}"
+            PORT="${{ secrets.API_PORT || '8000' }}"
+            ENV_SOURCE='${{ vars.DEPLOY_ENV_SOURCE }}'
+            ENV_SOURCE="${ENV_SOURCE:-both}"  # server | secrets | both
+
+            # Optional: load server-side .env (if present)
+            ENV_FILES=""
+            DEPLOY_PATH='${{ secrets.DEPLOY_PATH }}'
+            if [ "$ENV_SOURCE" != "secrets" ] && [ -n "$DEPLOY_PATH" ] && [ -f "$DEPLOY_PATH/.env" ]; then
+              ENV_FILES="--env-file $DEPLOY_PATH/.env"
+            fi
+
+            # Runtime secrets come from GitHub Secrets.
+            # We stage them into a temporary env-file to avoid quoting issues and
+            # to prevent overriding server-side env with empty values.
+            TMP_ENV=""
+            if [ "$ENV_SOURCE" != "server" ]; then
+              TMP_ENV="$(mktemp)"
+              trap 'rm -f "$TMP_ENV"' EXIT
+            fi
+
+            add_env() {
+              key="$1"
+              value="${2:-}"
+              if [ -n "$TMP_ENV" ] && [ -n "$value" ]; then
+                printf '%s=%s\n' "$key" "$value" >>"$TMP_ENV"
+              fi
+            }
+
+            add_env "MONGODB_URI" '${{ secrets.MONGODB_URI }}'
+            add_env "MONGODB_DATABASE" '${{ secrets.MONGODB_DATABASE }}'
+
+            add_env "NEIS_OPENAPI_TOKEN" '${{ secrets.NEIS_OPENAPI_TOKEN }}'
+            add_env "ATPT_OFCDC_SC_CODE" '${{ secrets.ATPT_OFCDC_SC_CODE }}'
+            add_env "SD_SCHUL_CODE" '${{ secrets.SD_SCHUL_CODE }}'
+            add_env "NUM_OF_GRADES" '${{ secrets.NUM_OF_GRADES }}'
+            add_env "NUM_OF_CLASSES" '${{ secrets.NUM_OF_CLASSES }}'
+
+            add_env "HDMeal_AllowedOrigins" '${{ secrets.HDMeal_AllowedOrigins }}'
+            add_env "HDMeal_AuthTokens" '${{ secrets.HDMeal_AuthTokens }}'
+            add_env "HDMeal_BaseURL" '${{ secrets.HDMeal_BaseURL }}'
+            add_env "HDMeal_JWTSecret" '${{ secrets.HDMeal_JWTSecret }}'
+            add_env "HDMeal_reCAPTCHA_Token" '${{ secrets.HDMeal_reCAPTCHA_Token }}'
+            add_env "HDMeal_SeoulData_Token" '${{ secrets.HDMeal_SeoulData_Token }}'
+            add_env "HDMeal_KMAZone" '${{ secrets.HDMeal_KMAZone }}'
+            add_env "HDMeal_MaxDaysRange" '${{ secrets.HDMeal_MaxDaysRange }}'
+            add_env "HDMeal_AppVersion" '${{ secrets.HDMeal_AppVersion }}'
+            add_env "HDMeal_AppBuild" '${{ secrets.HDMeal_AppBuild }}'
+
+            if [ -n "$TMP_ENV" ]; then
+              ENV_FILES="$ENV_FILES --env-file $TMP_ENV"
+            fi
+
+            docker pull "$IMAGE"
+
+            docker rm -f "$NAME" >/dev/null 2>&1 || true
+
+            docker run -d \
+              --name "$NAME" \
+              --restart unless-stopped \
+              -p "${PORT}:8000" \
+              $ENV_FILES \
+              "$IMAGE"
+
+            docker ps --filter "name=$NAME"

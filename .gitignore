@@ -1,0 +1,50 @@
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+
+# Virtual environments
+.venv/
+
+# Python caches
+__pycache__/
+*.py[cod]
+*.pyo
+
+# HDMeal backend artefacts
+hdmeal_backend.egg-info/
+dist/
+build/
+
+# Environment variables
+.env
+.env.local
+.env.development
+.env.test
+.env.production
+
+# Python tools and testing
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+.tox/
+.cache/
+
+# Logs
+*.log
+logs/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Runtime assets (each project populates its own folder)
+app/__pycache__/
+app/**/__pycache__/
+app/**/.pytest_cache/
+app/**/.mypy_cache/
+scripts/__pycache__/
