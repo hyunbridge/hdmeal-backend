@@ -1,5 +1,5 @@
 # Stage 1: Builder
-FROM python:3.12-slim AS builder
+FROM python:3.11-slim AS builder
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends gcc && \
@@ -17,10 +17,10 @@ FROM gcr.io/distroless/python3-debian12:nonroot
 USER nonroot:nonroot
 WORKDIR /app
 
-COPY --from=builder --chown=nonroot:nonroot /install/lib/python3.12/site-packages /home/nonroot/.local/lib/python3.12/site-packages
+COPY --from=builder --chown=nonroot:nonroot /install/lib/python3.11/site-packages /home/nonroot/.local/lib/python3.11/site-packages
 COPY --chown=nonroot:nonroot app ./app
 
-ENV PYTHONPATH=/home/nonroot/.local/lib/python3.12/site-packages:/app
+ENV PYTHONPATH=/home/nonroot/.local/lib/python3.11/site-packages:/app
 ENV PYTHONUNBUFFERED=1
 ENV PATH=/home/nonroot/.local/bin:$PATH
 
