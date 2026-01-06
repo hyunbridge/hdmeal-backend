@@ -30,8 +30,6 @@ class Settings(BaseSettings):
     kma_zone: str = Field(..., alias="HDMeal_KMAZone")
 
     jwt_secret: str = Field(..., alias="HDMeal_JWTSecret")
-    recaptcha_secret: str | None = Field(default=None, alias="HDMeal_reCAPTCHA_Token")
-
     cache_health_timetable_ttl_hours: int = 3
     cache_health_weather_ttl_hours: int = 1
     cache_health_water_temp_ttl_minutes: int = 76

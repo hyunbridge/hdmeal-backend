@@ -123,7 +123,6 @@ jobs:
             add_env "HDMeal_AuthTokens" '${{ secrets.HDMeal_AuthTokens }}'
             add_env "HDMeal_BaseURL" '${{ secrets.HDMeal_BaseURL }}'
             add_env "HDMeal_JWTSecret" '${{ secrets.HDMeal_JWTSecret }}'
-            add_env "HDMeal_reCAPTCHA_Token" '${{ secrets.HDMeal_reCAPTCHA_Token }}'
             add_env "HDMeal_SeoulData_Token" '${{ secrets.HDMeal_SeoulData_Token }}'
             add_env "HDMeal_KMAZone" '${{ secrets.HDMeal_KMAZone }}'
             add_env "HDMeal_MaxDaysRange" '${{ secrets.HDMeal_MaxDaysRange }}'

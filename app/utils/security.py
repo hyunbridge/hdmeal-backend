@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import datetime
 import random
-from typing import List, Tuple
-
-import httpx
+from typing import List
 from authlib.jose import JsonWebToken, JWTClaims
 from authlib.jose.errors import ExpiredTokenError, JoseError
 
@@ -64,16 +62,3 @@ def validate_token(token: str, req_id: str) -> Tuple[bool, str | None, List[str]
         return False, "InvalidToken", None
     return True, decoded["uid"], decoded.get("scope", [])
 
-
-def validate_recaptcha(token: str, req_id: str) -> Tuple[bool, str | None]:
-    if not _settings.recaptcha_secret:
-        return False, "RecaptchaTokenValidationError"
-    params = {"secret": _settings.recaptcha_secret, "response": token}
-    try:
-        response = httpx.post("https://www.google.com/recaptcha/api/siteverify", data=params, timeout=5.0)
-    except httpx.HTTPError:
-        return False, "RecaptchaTokenValidationError"
-    result = response.json()
-    if result.get("success"):
-        return True, None
-    return False, "InvalidRecaptchaToken"

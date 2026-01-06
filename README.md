@@ -80,7 +80,6 @@ uvicorn app.main:app --reload
 ### 선택(런타임)
 
 - `HDMeal_AllowedOrigins`: CORS 허용 Origin(쉼표 구분 또는 JSON 배열). 미설정 시 개발용 origin이 자동 포함됩니다.
-- `HDMeal_reCAPTCHA_Token`: reCAPTCHA 검증용 secret(미설정 시 검증 실패로 처리)
 - `HDMeal_MaxDaysRange`: `/api/app/days` 최대 조회 범위(기본 31일)
 - `HDMeal_AppVersion`, `HDMeal_AppBuild`: `/api/app/meta` 응답 값
 
@@ -113,7 +112,7 @@ GitHub Actions는 Docker 이미지 빌드/푸시 후 SSH로 서버에 접속해 
 - `HDMeal_AuthTokens`, `HDMeal_JWTSecret`
 - `HDMeal_SeoulData_Token`, `HDMeal_KMAZone`
 - `HDMeal_BaseURL`
-- `HDMeal_AllowedOrigins`(선택), `HDMeal_reCAPTCHA_Token`(선택)
+- `HDMeal_AllowedOrigins`(선택)
 - `HDMeal_MaxDaysRange`(선택), `HDMeal_AppVersion`(선택), `HDMeal_AppBuild`(선택)
 
 ## 라이선스
