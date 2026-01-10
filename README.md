@@ -74,7 +74,8 @@ uvicorn app.main:app --reload
 - `HDMeal_AuthTokens`: 카카오 스킬 인증 토큰(JSON 배열 또는 단일 문자열)
 - `HDMeal_JWTSecret`: 사용자 설정 JWT 서명 키
 - `HDMeal_SeoulData_Token`: 서울 열린데이터(한강 수온) API 키
-- `HDMeal_KMAZone`: KMA 동네예보 zone 코드
+- `HDMeal_KMA_ApiKey`: KMA 동네예보 API 키 (URL Encode되지 않은 값)
+- `HDMeal_KMA_NX`, `HDMeal_KMA_NY`: KMA 동네예보 격자 좌표 (기본 62, 120)
 - `HDMeal_BaseURL`: 사용자 설정 웹 베이스 URL(카드 링크/Allowed Origins 계산에 사용)
 
 ### 선택(런타임)
@@ -110,7 +111,7 @@ GitHub Actions는 Docker 이미지 빌드/푸시 후 SSH로 서버에 접속해 
 - `NEIS_OPENAPI_TOKEN`, `ATPT_OFCDC_SC_CODE`, `SD_SCHUL_CODE`
 - `NUM_OF_GRADES`, `NUM_OF_CLASSES`
 - `HDMeal_AuthTokens`, `HDMeal_JWTSecret`
-- `HDMeal_SeoulData_Token`, `HDMeal_KMAZone`
+- `HDMeal_SeoulData_Token`, `HDMeal_KMA_ApiKey`, `HDMeal_KMA_NX`, `HDMeal_KMA_NY`
 - `HDMeal_BaseURL`
 - `HDMeal_AllowedOrigins`(선택)
 - `HDMeal_MaxDaysRange`(선택), `HDMeal_AppVersion`(선택), `HDMeal_AppBuild`(선택)

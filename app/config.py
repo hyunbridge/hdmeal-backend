@@ -27,7 +27,10 @@ class Settings(BaseSettings):
     base_user_settings_url: str = Field(..., alias="HDMeal_BaseURL")
 
     seoul_data_token: str = Field(..., alias="HDMeal_SeoulData_Token")
-    kma_zone: str = Field(..., alias="HDMeal_KMAZone")
+    # kma_zone: str = Field(..., alias="HDMeal_KMAZone")  # Deprecated
+    kma_api_key: str = Field(..., alias="HDMeal_KMA_ApiKey")
+    kma_nx: int = Field(default=60, alias="HDMeal_KMA_NX")
+    kma_ny: int = Field(default=127, alias="HDMeal_KMA_NY")
 
     jwt_secret: str = Field(..., alias="HDMeal_JWTSecret")
     cache_health_timetable_ttl_hours: int = 3
