@@ -7,10 +7,9 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Dict, List
 
-import httpx
-
 from ..config import get_settings
 from ..schemas.data import MealDocument, MealMenuItem, ScheduleDocument, ScheduleEntry, TimetableDocument
+from .http_client import get_json
 
 _settings = get_settings()
 
@@ -27,10 +26,8 @@ _DELICIOUS_KEYWORDS = _load_delicious_keywords()
 _ALLERGY_PATTERN = re.compile(r"([0-9]+)\.")
 
 
-async def _get_json(client: httpx.AsyncClient, url: str, params: Dict[str, str]) -> Dict:
-    response = await client.get(url, params=params)
-    response.raise_for_status()
-    return response.json()
+async def _get_json(url: str, params: Dict[str, str], label: str) -> Dict:
+    return await get_json(url, params=params, timeout=10.0, retries=2, backoff=0.5, label=label)
 
 
 async def fetch_meals(start: date, end: date) -> Dict[str, MealDocument]:
@@ -45,8 +42,7 @@ async def fetch_meals(start: date, end: date) -> Dict[str, MealDocument]:
         "MLSV_TO_YMD": end.strftime("%Y%m%d"),
     }
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        data = await _get_json(client, url, params)
+    data = await _get_json(url, params, "neis.meals")
 
     payload: Dict[str, MealDocument] = {}
     service_data = data.get("mealServiceDietInfo")
@@ -99,8 +95,7 @@ async def fetch_schedule(start: date, end: date) -> Dict[str, ScheduleDocument]:
         "AA_TO_YMD": end.strftime("%Y%m%d"),
     }
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        data = await _get_json(client, url, params)
+    data = await _get_json(url, params, "neis.schedule")
 
     payload: Dict[str, ScheduleDocument] = {}
     root = data.get("SchoolSchedule")
@@ -159,34 +154,33 @@ async def fetch_timetable(start: date, end: date) -> Dict[str, TimetableDocument
 
     lessons: Dict[str, Dict[str, Dict[str, List[str]]]] = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
 
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        page = 1
-        while True:
-            page_params = params | {"pIndex": str(page)}
-            data = await _get_json(client, url, page_params)
-            root = data.get("hisTimetable")
-            if not root or len(root) < 2:
-                break
-            rows = root[1].get("row", [])
-            if not rows:
-                break
-            for row in rows:
-                class_name = row.get("CLASS_NM")
-                subject = row.get("ITRT_CNTNT")
-                grade_value = row.get("GRADE")
-                if not class_name or not subject or subject == "토요휴업일" or not grade_value:
-                    continue
-                try:
-                    class_key = str(int(class_name))
-                    grade_key = str(int(grade_value))
-                except (TypeError, ValueError):
-                    continue
-                key = row.get("ALL_TI_YMD")
-                day = datetime.strptime(key, "%Y%m%d").date()
-                lessons[_date_key(day)][grade_key][class_key].append(subject)
-            if len(rows) < 1000:
-                break
-            page += 1
+    page = 1
+    while True:
+        page_params = params | {"pIndex": str(page)}
+        data = await _get_json(url, page_params, "neis.timetable")
+        root = data.get("hisTimetable")
+        if not root or len(root) < 2:
+            break
+        rows = root[1].get("row", [])
+        if not rows:
+            break
+        for row in rows:
+            class_name = row.get("CLASS_NM")
+            subject = row.get("ITRT_CNTNT")
+            grade_value = row.get("GRADE")
+            if not class_name or not subject or subject == "토요휴업일" or not grade_value:
+                continue
+            try:
+                class_key = str(int(class_name))
+                grade_key = str(int(grade_value))
+            except (TypeError, ValueError):
+                continue
+            key = row.get("ALL_TI_YMD")
+            day = datetime.strptime(key, "%Y%m%d").date()
+            lessons[_date_key(day)][grade_key][class_key].append(subject)
+        if len(rows) < 1000:
+            break
+        page += 1
 
     payload: Dict[str, TimetableDocument] = {}
     for key, grade_map in lessons.items():

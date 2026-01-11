@@ -15,6 +15,7 @@ from .routers import app_api, chatbot
 from .services.data_service import DataService
 from .services.ingestion_service import IngestionService
 from .tasks.scheduler import PeriodicTask
+from .ingestion.http_client import close_http_client
 from .utils.logging import get_logger, setup_logging
 from .utils import security
 
@@ -50,6 +51,7 @@ async def lifespan(app: FastAPI):
     # Shutdown: Stop periodic tasks
     refresh_task.stop()
     close_client()
+    await close_http_client()
     logger.info("Application shutdown complete")
 
 

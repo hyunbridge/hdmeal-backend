@@ -5,10 +5,9 @@ import datetime
 from typing import Optional
 from zoneinfo import ZoneInfo
 
-import httpx
-
 from ..config import get_settings
 from ..schemas.data import WaterTemperatureDocument, WeatherDocument
+from .http_client import get_json
 
 _settings = get_settings()
 _KST = ZoneInfo("Asia/Seoul")
@@ -58,12 +57,8 @@ async def fetch_weather() -> Optional[WeatherDocument]:
     }
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.get(url, params=params)
-            response.raise_for_status()
-            data = response.json()
-    except (httpx.RequestError, httpx.HTTPStatusError, ValueError):
-        # Fallback or error handling
+        data = await get_json(url, params=params, timeout=10.0, retries=2, backoff=0.5, label="kma.weather")
+    except Exception:
         return None
 
     try:
@@ -165,11 +160,7 @@ async def fetch_weather() -> Optional[WeatherDocument]:
 async def fetch_water_temperature() -> Optional[WaterTemperatureDocument]:
     url = f"http://openapi.seoul.go.kr:8088/{_settings.seoul_data_token}/json/WPOSInformationTime/1/5/"
 
-    async with httpx.AsyncClient(timeout=5.0) as client:
-        response = await client.get(url)
-        response.raise_for_status()
-
-    data = response.json()
+    data = await get_json(url, timeout=5.0, retries=2, backoff=0.5, label="seoul.water")
     try:
         rows = data["WPOSInformationTime"]["row"]
     except (KeyError, TypeError):
