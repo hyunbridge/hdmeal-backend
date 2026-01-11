@@ -178,7 +178,7 @@ async def fetch_water_temperature() -> Optional[WaterTemperatureDocument]:
     try:
         measurement = rows[0]
         timestamp_local = datetime.datetime.strptime(
-            f"{measurement['MSR_DATE']} {measurement['MSR_TIME']}", "%Y%m%d %H:%M"
+            f"{measurement['YMD']} {measurement['HR']}", "%Y%m%d %H:%M"
         )
     except (IndexError, KeyError, ValueError):
         return None
@@ -186,7 +186,7 @@ async def fetch_water_temperature() -> Optional[WaterTemperatureDocument]:
 
     temperatures = []
     for row in rows:
-        value = row.get("W_TEMP")
+        value = row.get("WATT")
         try:
             temperatures.append(float(value))
         except (TypeError, ValueError):
