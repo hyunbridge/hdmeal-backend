@@ -7,10 +7,12 @@ from zoneinfo import ZoneInfo
 
 from ..config import get_settings
 from ..schemas.data import WaterTemperatureDocument, WeatherDocument
+from ..utils.logging import get_logger
 from .http_client import get_json
 
 _settings = get_settings()
 _KST = ZoneInfo("Asia/Seoul")
+logger = get_logger("ingestion.auxiliary")
 
 
 async def fetch_weather() -> Optional[WeatherDocument]:
@@ -64,6 +66,8 @@ async def fetch_weather() -> Optional[WeatherDocument]:
     try:
         result_code = data.get("response", {}).get("header", {}).get("resultCode")
         if result_code and result_code != "00":
+            result_msg = data.get("response", {}).get("header", {}).get("resultMsg")
+            logger.warning("Weather API returned resultCode=%s resultMsg=%s", result_code, result_msg)
             return None
         items = data["response"]["body"]["items"]["item"]
     except (KeyError, TypeError):
@@ -78,25 +82,32 @@ async def fetch_weather() -> Optional[WeatherDocument]:
     
     representative_item = None
     
-    # First, try to find 0900 for today (if in future relative to base_time)
+    tmp_items = []
+    tmp_by_slot = {}
+    slot_values = {}
+
     for item in items:
-        if item["category"] == "TMP" and item["fcstDate"] == today_str and item["fcstTime"] == "0900":
-            representative_item = item
-            break
-            
+        fcst_date = item.get("fcstDate")
+        fcst_time = item.get("fcstTime")
+        category = item.get("category")
+        value = item.get("fcstValue")
+        if not fcst_date or not fcst_time or not category:
+            continue
+        slot_values[(fcst_date, fcst_time, category)] = value
+        if category == "TMP":
+            tmp_items.append(item)
+            tmp_by_slot.setdefault((fcst_date, fcst_time), item)
+
+    # First, try to find 0900 for today (if in future relative to base_time)
+    representative_item = tmp_by_slot.get((today_str, "0900"))
+
     # If not found (e.g. passed), and now > 17:00, maybe look for Tomorrow 0900?
     if not representative_item and now.hour >= 17:
-        for item in items:
-             if item["category"] == "TMP" and item["fcstDate"] == tomorrow_str and item["fcstTime"] == "0900":
-                representative_item = item
-                break
+        representative_item = tmp_by_slot.get((tomorrow_str, "0900"))
                 
     # If still not found, just take the first TMP item (nearest)
-    if not representative_item:
-        for item in items:
-            if item["category"] == "TMP":
-                representative_item = item
-                break
+    if not representative_item and tmp_items:
+        representative_item = tmp_items[0]
     
     if not representative_item:
         return None
@@ -106,10 +117,7 @@ async def fetch_weather() -> Optional[WeatherDocument]:
     
     # Now extract all params for this specific time slot
     def get_val_for_slot(cat):
-        for item in items:
-            if item["fcstDate"] == rep_date and item["fcstTime"] == rep_time and item["category"] == cat:
-                return item["fcstValue"]
-        return ""
+        return slot_values.get((rep_date, rep_time, cat), "")
 
     temp = get_val_for_slot("TMP")
     sky_code = get_val_for_slot("SKY")
@@ -117,17 +125,8 @@ async def fetch_weather() -> Optional[WeatherDocument]:
     pop = get_val_for_slot("POP")
     reh = get_val_for_slot("REH")
     
-    # Get TMX and TMN for the *representative date*
-    # TMN is usually at 0600, TMX at 1500.
-    # We scan ALL items for this date.
-    tmn = ""
-    tmx = ""
-    for item in items:
-        if item["fcstDate"] == rep_date:
-            if item["category"] == "TMN":
-                tmn = item["fcstValue"]
-            elif item["category"] == "TMX":
-                tmx = item["fcstValue"]
+    tmn = slot_values.get((rep_date, "0600", "TMN"), "")
+    tmx = slot_values.get((rep_date, "1500", "TMX"), "")
 
     # Mapping
     def _map_sky(val):
