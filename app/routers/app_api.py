@@ -11,6 +11,7 @@ from ..dependencies import get_data_service, get_ingestion_service
 from ..services.data_service import DataService
 from ..services.ingestion_service import IngestionService
 from ..utils import security
+from ..utils.timezone import today_kst, to_kst
 from ..schemas import (
     DayOut,
     DayResponse,
@@ -77,10 +78,11 @@ def _serialize_meal(meal) -> Optional[MealOut]:
 
     if not meal or not meal.menus:
         return None
+    updated_at = getattr(meal, "created_at", None)
     return MealOut(
         items=[MealItemOut(name=item.name, allergies=item.allergies) for item in meal.menus],
         kcal=meal.calories,
-        updatedAt=getattr(meal, "created_at", None),
+        updatedAt=to_kst(updated_at) if updated_at else None,
     )
 
 
@@ -97,7 +99,7 @@ def _serialize_timetable(data_service: DataService, timetable) -> TimetableOut:
 
     lessons = timetable.lessons if timetable else data_service.empty_timetable()
     updated_at = getattr(timetable, "created_at", None) if timetable else None
-    return TimetableOut(lessons=lessons, updatedAt=updated_at)
+    return TimetableOut(lessons=lessons, updatedAt=to_kst(updated_at) if updated_at else None)
 
 
 def _serialize_day(
@@ -151,7 +153,7 @@ async def get_days(
     """일자 범위에 대한 통합 데이터를 조회합니다."""
     request_id = getattr(request.state, "req_id", security.generate_req_id())
 
-    today = date.today()
+    today = today_kst()
     start_date = _parse_optional_date(start) or (today - timedelta(days=_DEFAULT_PAST_DAYS))
     end_date = _parse_optional_date(end) or (today + timedelta(days=_DEFAULT_FUTURE_DAYS))
     _validate_range(start_date, end_date)

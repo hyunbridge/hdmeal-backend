@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from .data_service import DataService
 from ..ingestion import auxiliary, neis
 from ..utils.logging import get_logger
+from ..utils.timezone import today_kst
 
 logger = get_logger("ingestion")
 
@@ -14,7 +15,7 @@ class IngestionService:
         self._data_service = data_service
 
     async def sync_window(self, center: date | None = None, days_before: int = 10, days_after: int = 10) -> None:
-        target = center or date.today()
+        target = center or today_kst()
         start = target - timedelta(days=days_before)
         end = target + timedelta(days=days_after)
         logger.info(f"Syncing data window: {start} to {end}")

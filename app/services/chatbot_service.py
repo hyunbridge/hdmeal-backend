@@ -5,11 +5,10 @@ import json
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
-from zoneinfo import ZoneInfo
-
 from ..config import get_settings
 from ..schemas.data import MealDocument, ScheduleDocument, TimetableDocument
 from ..utils import security
+from ..utils.timezone import now_kst, to_kst
 from .data_service import DataService
 from .ingestion_service import IngestionService
 from .user_service import UserService
@@ -37,7 +36,6 @@ _ALLERGY_LABELS = [
     "조개류",
 ]
 
-_KST = ZoneInfo("Asia/Seoul")
 LegacyResponse = Tuple[List[Any], Optional[Any], Optional[str]]
 
 
@@ -277,7 +275,7 @@ class ChatbotService:
 
     def _get_briefing_target_date(self) -> tuple[datetime, str]:
         """Determine target date and label based on current time."""
-        now = datetime.now(_KST)
+        now = now_kst()
         if now.time() >= time(17, 0):
             return now + timedelta(days=1), "내일"
         return now, "오늘"
@@ -362,9 +360,10 @@ class ChatbotService:
             water_doc = await self._ensure_water_temperature()
             if not water_doc:
                 raise ValueError
-            hour_label = self._format_hour(water_doc.timestamp)
+            local_ts = to_kst(water_doc.timestamp)
+            hour_label = self._format_hour(local_ts)
             message = (
-                f"{water_doc.timestamp.date()} {hour_label} 측정자료:\n한강 수온은 {water_doc.temperature_c}°C 입니다."
+                f"{local_ts.date()} {hour_label} 측정자료:\n한강 수온은 {water_doc.temperature_c}°C 입니다."
             )
             return ([message], None, None)
         except ConnectionError:

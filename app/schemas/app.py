@@ -14,7 +14,7 @@ class MealItemOut(BaseModel):
 class MealOut(BaseModel):
     items: List[MealItemOut] = Field(description="알레르기 정보를 포함한 메뉴 목록")
     kcal: Optional[float] = Field(default=None, description="총 열량(kcal)")
-    updatedAt: Optional[datetime] = Field(default=None, description="데이터 최신화 시각 (UTC)")
+    updatedAt: Optional[datetime] = Field(default=None, description="데이터 최신화 시각 (KST)")
 
 
 class ScheduleItemOut(BaseModel):
@@ -26,7 +26,7 @@ class TimetableOut(BaseModel):
     lessons: Dict[str, Dict[str, List[str]]] = Field(
         description="학년/반별 시간표 정보", example={"1": {"1": ["국어", "수학"]}}
     )
-    updatedAt: Optional[datetime] = Field(default=None, description="시간표 데이터 최신화 시각 (UTC)")
+    updatedAt: Optional[datetime] = Field(default=None, description="시간표 데이터 최신화 시각 (KST)")
 
 
 class DayOut(BaseModel):

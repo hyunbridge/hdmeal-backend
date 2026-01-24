@@ -19,6 +19,7 @@ from ..services.data_service import DataService
 from ..services.ingestion_service import IngestionService
 from ..services.user_service import UserService
 from ..utils import security
+from ..utils.timezone import now_kst
 
 router = APIRouter()
 _settings = get_settings()
@@ -229,8 +230,9 @@ async def cache_healthcheck(
 ):
     req_id = getattr(request.state, "req_id", security.generate_req_id())
 
-    now = datetime.now(timezone.utc)
-    timetable = await data_service.get_timetable(now.date())
+    now_utc = datetime.now(timezone.utc)
+    now_kst_dt = now_kst()
+    timetable = await data_service.get_timetable(now_kst_dt.date())
     weather = await data_service.get_weather_recent()
     water = await data_service.get_water_temperature_recent()
 
@@ -240,21 +242,21 @@ async def cache_healthcheck(
         created_at = getattr(timetable, "created_at", None)
         if created_at is None:
             return "NotFound"
-        age = now - created_at
+        age = now_utc - created_at
         ttl = _settings.cache_health_timetable_ttl_hours
         return "Valid" if age <= timedelta(hours=ttl) else "Expired"
 
     def _status_weather():
         if not weather:
             return "NotFound"
-        age = now - weather.timestamp
+        age = now_utc - weather.timestamp
         ttl = _settings.cache_health_weather_ttl_hours
         return "Valid" if age <= timedelta(hours=ttl) else "Expired"
 
     def _status_water():
         if not water:
             return "NotFound"
-        age = now - water.timestamp
+        age = now_utc - water.timestamp
         ttl = _settings.cache_health_water_temp_ttl_minutes
         return "Valid" if age <= timedelta(minutes=ttl) else "Expired"
 
