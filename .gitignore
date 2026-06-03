@@ -1,0 +1,66 @@
+# -----------------------------
+# Rust build artifacts
+# -----------------------------
+/target/
+**/*.rs.bk
+Cargo.lock.bak
+*.profraw
+*.profdata
+*.dSYM/
+
+# -----------------------------
+# OS artifacts
+# -----------------------------
+.DS_Store
+Thumbs.db
+Desktop.ini
+ehthumbs.db
+$RECYCLE.BIN/
+.Spotlight-V100/
+.Trashes/
+._*
+
+# -----------------------------
+# Editors / IDEs
+# -----------------------------
+.idea/
+.vscode/
+.fleet/
+*.iml
+*.code-workspace
+*.suo
+*.user
+*.userossc
+*.sln.docstates
+*.swp
+*.swo
+*~
+
+# -----------------------------
+# Local env / secrets
+# -----------------------------
+.env
+.env.*
+!.env.example
+!.env.sample
+*.local
+secrets/
+*.pem
+*.key
+*.crt
+
+# -----------------------------
+# Logs / temp / cache
+# -----------------------------
+*.log
+*.out
+*.err
+*.pid
+*.pid.lock
+*.seed
+*.tmp
+*.temp
+tmp/
+temp/
+coverage/
+htmlcov/
