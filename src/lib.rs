@@ -2,6 +2,8 @@
 //!
 //! [`app`] 모듈이 컴포지션 루트이며, [`app::run`] 가 HTTP 서버를 띄우는 단일 함수입니다.
 
+#![deny(unsafe_code)]
+
 pub mod app;
 pub mod application;
 pub mod config;
