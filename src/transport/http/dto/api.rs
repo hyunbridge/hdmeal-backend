@@ -173,3 +173,49 @@ pub fn parse_optional_date_param(s: Option<&str>) -> Result<Option<NaiveDate>, S
 pub fn parse_updated_at(dt: &DateTime<chrono::Utc>) -> String {
     crate::shared::timezone::to_kst_iso(dt)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_date_param_accepts_iso() {
+        let d = parse_date_param("2026-06-04", "from").unwrap();
+        assert_eq!(d.to_string(), "2026-06-04");
+    }
+
+    #[test]
+    fn parse_date_param_rejects_wrong_format() {
+        let err = parse_date_param("06-04-2026", "from").unwrap_err();
+        assert!(err.contains("from"), "field name leaked: {err}");
+        assert!(err.contains("YYYY-MM-DD"), "format hint missing: {err}");
+    }
+
+    #[test]
+    fn parse_date_param_rejects_garbage() {
+        assert!(parse_date_param("not-a-date", "to").is_err());
+    }
+
+    #[test]
+    fn parse_optional_date_param_none() {
+        assert_eq!(parse_optional_date_param(None).unwrap(), None);
+    }
+
+    #[test]
+    fn parse_optional_date_param_empty_string() {
+        assert_eq!(parse_optional_date_param(Some("")).unwrap(), None);
+    }
+
+    #[test]
+    fn parse_optional_date_param_valid() {
+        let d = parse_optional_date_param(Some("2026-01-15"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(d.to_string(), "2026-01-15");
+    }
+
+    #[test]
+    fn parse_optional_date_param_invalid() {
+        assert!(parse_optional_date_param(Some("20260115")).is_err());
+    }
+}
