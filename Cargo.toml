@@ -43,14 +43,37 @@ url = "2"
 subtle = "2"
 percent-encoding = "2"
 
+# 테스트 / 벤치 / 예제 빌드 시에만 활성화되는 추가 feature.
+# release 빌드에는 포함되지 않으므로, 런타임 바이너리 크기에 영향 없음.
 [dev-dependencies]
-tokio = { version = "1", features = ["full", "test-util", "macros"] }
-
-[profile.release]
-opt-level = 3
-lto = "thin"
-codegen-units = 1
-strip = "symbols"
+warp = { version = "0.4", features = ["server", "test"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "signal", "sync", "io-util", "test-util"] }
 
 [lints.rust]
 unsafe_code = "forbid"
+
+# ----- Release profile (size + perf 극한) -----
+# - `lto = "fat"`: whole-program LTO 로 dead code / 중복 모노모피즈이션 적극 제거 → 가장 작은 바이너리.
+# - `panic = "abort"`: unwinding tables / landing pads 제거 → 크기 ↓, 약간의 perf ↑ (panic 은 그대로 발생).
+# - `codegen-units = 1`: inlining / 최적화 cross-module 활성화 (fat LTO 와 시너지).
+# - `opt-level = 3`: full optimization.
+# - `strip = "symbols"`: 최종 바이너리에서 symbol table 제거. panic 의 file:line 은 .symtab 제거로 사라지지만,
+#   prod 서버에서는 무시할 수 있는 trade-off. 더 줄이려면 `strip = true` (Rust 1.59+).
+# - `incremental = false`: release 에서 incremental compilation 비활성 (이미 기본이지만 명시).
+# - `build-override`: build.rs (proc-macro 등) 도 release 레벨로 컴파일.
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = "symbols"
+incremental = false
+debug = false
+
+[profile.release.build-override]
+opt-level = 3
+codegen-units = 1
+
+# 모든 의존성 패키지에 release 레벨 최적화 강제.
+[profile.release.package."*"]
+opt-level = 3
