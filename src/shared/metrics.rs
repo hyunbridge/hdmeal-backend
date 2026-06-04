@@ -11,9 +11,11 @@
 //! 교체하는 게 가장 적은 비용입니다.
 
 use std::collections::BTreeMap;
+use std::fmt::Write as _;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use parking_lot::Mutex;
 
 /// 프로세스 시작 시각 (epoch seconds). 게이지 한 줄로 노출.
 pub struct Metrics {
@@ -43,41 +45,51 @@ impl Metrics {
 
     /// HTTP 요청 1 건을 카운트.
     pub fn record_request(&self, path: &str, method: &str, status: u16) {
-        let key = RequestKey {
-            path: path.to_string(),
-            method: method.to_string(),
-            status,
-        };
-        let mut map = self.requests.lock().expect("metrics lock poisoned");
-        *map.entry(key).or_insert(0) += 1;
+        let mut map = self.requests.lock();
+        let entry = map
+            .entry(RequestKey {
+                path: path.to_owned(),
+                method: method.to_owned(),
+                status,
+            })
+            .or_insert(0);
+        *entry += 1;
     }
 
     /// Prometheus text format 직렬화.
     pub fn render(&self) -> String {
-        let mut out = String::with_capacity(512);
+        // 라인당 평균 ~80 바이트 가정. 64 entries 까지 in-place 로 처리.
+        let mut out = String::with_capacity(1024);
         out.push_str("# HELP http_requests_total Total HTTP requests by path, method, status.\n");
         out.push_str("# TYPE http_requests_total counter\n");
 
-        let map = self.requests.lock().expect("metrics lock poisoned");
-        for (key, count) in map.iter() {
+        // lock 보유 시간을 줄이기 위해 (key, count) 스냅샷만 복사.
+        let snapshot: Vec<(RequestKey, u64)> = {
+            let map = self.requests.lock();
+            map.iter().map(|(k, v)| (k.clone(), *v)).collect()
+        };
+
+        for (key, count) in &snapshot {
             // 라벨 값 escape (`"` 와 `\`).
-            out.push_str(&format!(
-                "http_requests_total{{path=\"{}\",method=\"{}\",status=\"{}\"}} {}\n",
+            let _ = writeln!(
+                out,
+                "http_requests_total{{path=\"{}\",method=\"{}\",status=\"{}\"}} {}",
                 escape_label(&key.path),
                 escape_label(&key.method),
                 key.status,
                 count,
-            ));
+            );
         }
 
         out.push_str(
             "# HELP process_start_time_seconds Unix epoch seconds when the process started.\n",
         );
         out.push_str("# TYPE process_start_time_seconds gauge\n");
-        out.push_str(&format!(
-            "process_start_time_seconds {}\n",
+        let _ = writeln!(
+            out,
+            "process_start_time_seconds {}",
             self.start_time_secs.load(Ordering::Relaxed),
-        ));
+        );
         out
     }
 }
