@@ -1,0 +1,39 @@
+# ----- 빌드 가속 / 최적화 -----
+#
+# - Linux (Docker 포함) 에서는 `mold` 링커 사용 — ld/lld 대비 수배 빠른 link.
+#   mold 가 없으면 cargo 가 자동으로 system ld 로 fallback.
+# - macOS 에서는 mold 를 지원하지 않으므로 system ld64 사용 (기본값).
+# - `target-cpu` 는 host 기준. 로컬 빌드는 native, CI/Docker 는 RUSTFLAGS 로 덮어씀.
+
+[build]
+# 빠른 incremental (dev). release 는 profile.release.* 가 우선.
+incremental = true
+
+# ----- target 별 설정 -----
+# x86_64 Linux (Docker): mold + codegen-units=1
+[target.x86_64-unknown-linux-gnu]
+linker = "mold"
+
+# aarch64 Linux: mold 사용 가능
+[target.aarch64-unknown-linux-gnu]
+linker = "mold"
+
+# ----- target 별 RUSTFLAGS -----
+# Linux: strip + codegen-units + (옵션) target-cpu
+# `target-cpu` 는 x86_64-v3 (Haswell+, 2013~) 기본. 더 보수적으로 하려면 v2 로 변경.
+[target.x86_64-unknown-linux-gnu.env]
+RUSTFLAGS = "-C strip=symbols -C codegen-units=1 -C target-cpu=x86-64-v3"
+
+[target.aarch64-unknown-linux-gnu.env]
+RUSTFLAGS = "-C strip=symbols -C codegen-units=1 -C target-cpu=neoverse-n1"
+
+# macOS: native (Apple Silicon / Intel 자동 감지)
+[target.x86_64-apple-darwin]
+rustflags = ["-C", "strip=symbols", "-C", "codegen-units=1", "-C", "target-cpu=native"]
+
+[target.aarch64-apple-darwin]
+rustflags = ["-C", "strip=symbols", "-C", "codegen-units=1", "-C", "target-cpu=native"]
+
+# ----- Cargo 설정 -----
+[net]
+git-fetch-with-cli = true
