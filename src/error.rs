@@ -90,7 +90,8 @@ impl HDMealError {
     pub fn status(&self) -> StatusCode {
         match self {
             Self::BadRequest(_) | Self::Json(_) => StatusCode::BAD_REQUEST,
-            Self::Unauthorized(_) | Self::Jwt(_) => StatusCode::UNAUTHORIZED,
+            Self::Unauthorized(_) => StatusCode::UNAUTHORIZED,
+            Self::Jwt(_) => StatusCode::FORBIDDEN,
             Self::Forbidden(_) => StatusCode::FORBIDDEN,
             Self::NotFound(_) => StatusCode::NOT_FOUND,
             Self::ServiceUnavailable(_) | Self::Http(_) => StatusCode::SERVICE_UNAVAILABLE,
