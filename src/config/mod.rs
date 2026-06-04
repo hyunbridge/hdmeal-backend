@@ -8,10 +8,8 @@
 use std::env;
 use std::time::Duration;
 
-use serde::Deserialize;
+use anyhow::{anyhow, Result as AnyhowResult};
 use url::Url;
-
-use crate::error::{HDMealError, HDMealResult};
 
 /// 글로벌 앱 설정. 한 번 로드되면 사실상 불변.
 #[derive(Debug, Clone)]
@@ -56,7 +54,11 @@ pub struct AppConfig {
 
 impl AppConfig {
     /// 환경에서 전체 설정을 로드합니다. `dotenvy` 가 자동으로 `.env` 를 찾습니다.
-    pub fn from_env() -> HDMealResult<Self> {
+    ///
+    /// Missing / malformed env vars 는 모두 `anyhow::Error` 로 bubble 됩니다 —
+    /// 서버 startup 시점의 fatal error 이므로 [`crate::error::HDMealError`]
+    /// (HTTP 4xx envelope) 로 표현하지 않습니다.
+    pub fn from_env() -> AnyhowResult<Self> {
         let _ = dotenvy::dotenv();
 
         let app_name = env::var("APP_NAME").unwrap_or_else(|_| "hdmeal-backend".to_string());
@@ -69,10 +71,10 @@ impl AppConfig {
         let neis_openapi_token = required("NEIS_OPENAPI_TOKEN")?;
         let atpt_ofcdc_sc_code = required("ATPT_OFCDC_SC_CODE")?;
         let sd_schul_code = required("SD_SCHUL_CODE")?;
-        let num_of_grades = parse_u32("NUM_OF_GRADES")
-            .ok_or_else(|| HDMealError::bad_request("NUM_OF_GRADES 가 필요합니다."))?;
-        let num_of_classes = parse_u32("NUM_OF_CLASSES")
-            .ok_or_else(|| HDMealError::bad_request("NUM_OF_CLASSES 가 필요합니다."))?;
+        let num_of_grades =
+            parse_u32("NUM_OF_GRADES").ok_or_else(|| anyhow!("NUM_OF_GRADES 가 필요합니다."))?;
+        let num_of_classes =
+            parse_u32("NUM_OF_CLASSES").ok_or_else(|| anyhow!("NUM_OF_CLASSES 가 필요합니다."))?;
 
         let kma_api_key = required("HDMeal_KMA_ApiKey")?;
         let kma_nx = parse_u32("HDMeal_KMA_NX").unwrap_or(60);
@@ -82,13 +84,12 @@ impl AppConfig {
 
         let auth_tokens = parse_list("HDMeal_AuthTokens")?;
         if auth_tokens.is_empty() {
-            return Err(HDMealError::bad_request("HDMeal_AuthTokens 가 필요합니다."));
+            return Err(anyhow!("HDMeal_AuthTokens 가 필요합니다."));
         }
         let jwt_secret = required("HDMeal_JWTSecret")?;
         let base_url = Url::parse(&required("HDMeal_BaseURL")?)?;
 
-        let raw_origins = parse_list("HDMeal_AllowedOrigins").unwrap_or_default();
-        let mut allowed_origins = raw_origins.clone();
+        let mut allowed_origins = parse_list("HDMeal_AllowedOrigins").unwrap_or_default();
         if let Some(origin) = origin_from_url(&base_url) {
             if !allowed_origins.contains(&origin) {
                 allowed_origins.push(origin);
@@ -155,8 +156,8 @@ impl AppConfig {
     }
 }
 
-fn required(key: &str) -> HDMealResult<String> {
-    env::var(key).map_err(|_| HDMealError::bad_request(format!("{key} 가 필요합니다.")))
+fn required(key: &str) -> AnyhowResult<String> {
+    env::var(key).map_err(|_| anyhow!("{key} 가 필요합니다."))
 }
 
 fn parse_u16(key: &str) -> Option<u16> {
@@ -180,7 +181,7 @@ fn parse_bool(key: &str) -> Option<bool> {
 }
 
 /// JSON 배열 문자열을 우선 파싱, 실패하면 콤마 구분으로 분리.
-pub fn parse_list(key: &str) -> HDMealResult<Vec<String>> {
+pub fn parse_list(key: &str) -> AnyhowResult<Vec<String>> {
     let raw = match env::var(key) {
         Ok(v) => v,
         Err(_) => return Ok(Vec::new()),
@@ -219,12 +220,4 @@ fn origin_from_url(url: &Url) -> Option<String> {
         }
     }
     Some(origin)
-}
-
-/// `Settings.allowed_origins` 와 동등한 결과를 반환하는
-/// 디버깅용 직렬화 구조체. 테스트나 CLI 출력에 사용.
-#[derive(Debug, Deserialize)]
-pub struct OriginsDump {
-    pub allowed_origins: Vec<String>,
-    pub allow_credentials: bool,
 }
