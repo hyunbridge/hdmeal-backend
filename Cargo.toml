@@ -2,7 +2,7 @@
 name = "hdmeal-backend"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.75"
+rust-version = "1.83"
 description = "HDMeal backend (Rust + Warp) — NEIS 급식/시간표/일정, KMA 날씨, 한강 수온, 카카오 챗봇, MongoDB"
 license = "MIT"
 
