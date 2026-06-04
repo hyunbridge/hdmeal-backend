@@ -163,7 +163,7 @@ mod tests {
         let d2 = c.compute_delay_no_header(2).as_millis();
         // attempt=0: 500 + [0,500) = [500, 1000)
         // attempt=2: 2000 + [0,500) = [2000, 2500)
-        assert!(d0 >= 500 && d0 < 1000, "got {d0}");
-        assert!(d2 >= 2000 && d2 < 2500, "got {d2}");
+        assert!((500..1000).contains(&d0), "got {d0}");
+        assert!((2000..2500).contains(&d2), "got {d2}");
     }
 }

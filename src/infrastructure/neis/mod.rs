@@ -2,4 +2,5 @@
 
 pub mod auxiliary;
 pub mod http_client;
+#[allow(clippy::module_inception)]
 pub mod neis;

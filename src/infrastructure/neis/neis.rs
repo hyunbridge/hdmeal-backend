@@ -15,7 +15,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use chrono::NaiveDate;
-use once_cell::sync::Lazy;
+use std::sync::LazyLock;
+
 use regex::Regex;
 use serde::Deserialize;
 
@@ -29,7 +30,7 @@ use crate::error::{HDMealError, HDMealResult};
 /// "⭐" 마킹할 키워드. 컴파일 타임에 `data/delicious.txt` 를 임베드.
 const DELICIOUS_KEYWORDS: &str = include_str!("../../../data/delicious.txt");
 
-static DELICIOUS_SET: Lazy<BTreeSet<&'static str>> = Lazy::new(|| {
+static DELICIOUS_SET: LazyLock<BTreeSet<&'static str>> = LazyLock::new(|| {
     DELICIOUS_KEYWORDS
         .lines()
         .map(|l| l.trim())
@@ -37,8 +38,8 @@ static DELICIOUS_SET: Lazy<BTreeSet<&'static str>> = Lazy::new(|| {
         .collect()
 });
 
-static ALLERGY_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"(\d+)\.").unwrap());
-static TRAILING_RE: Lazy<Regex> = Lazy::new(|| Regex::new(r"[ #&*\-.\-=@_]+$").unwrap());
+static ALLERGY_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(\d+)\.").unwrap());
+static TRAILING_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[ #&*\-.\-=@_]+$").unwrap());
 
 const NEIS_BASE: &str = "https://open.neis.go.kr/hub";
 const MMEAL_SC_LUNCH: &str = "2";
@@ -312,6 +313,7 @@ pub struct NeisFetchAll {
 /// NEIS 응답 envelope.
 /// `{"<serviceName>": [{"head": [...], "row": [...]}]}` 형태를 그대로 매핑.
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct NeisRawService {
     #[serde(default)]
     head: Vec<NeisHead>,
@@ -320,6 +322,7 @@ struct NeisRawService {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct NeisHead {
     #[serde(rename = "list_total_count")]
     list_total_count: Option<u32>,
@@ -328,6 +331,7 @@ struct NeisHead {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct NeisResultInfo {
     code: String,
     message: String,
@@ -403,6 +407,7 @@ struct ScheduleRow {
     #[serde(rename = "SIX_GRADE_EVENT_YN")]
     SIX_GRADE_EVENT_YN: String,
     #[serde(rename = "SBTR_DD_SC_NM", default)]
+    #[allow(dead_code)]
     SBTR_DD_SC_NM: String,
 }
 

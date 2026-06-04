@@ -122,12 +122,10 @@ impl KmaClient {
                 continue;
             }
             match it.category.as_str() {
-                "TMP" => {
-                    if it.fcst_time == fcst_time {
-                        temp = it.fcst_value.clone();
-                        if first_hour.is_empty() {
-                            first_hour = it.fcst_time[0..2].to_string();
-                        }
+                "TMP" if it.fcst_time == fcst_time => {
+                    temp = it.fcst_value.clone();
+                    if first_hour.is_empty() {
+                        first_hour = it.fcst_time[0..2].to_string();
                     }
                 }
                 "SKY" if it.fcst_time == fcst_time => sky = map_sky(&it.fcst_value),
@@ -293,6 +291,7 @@ struct KmaItems {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 struct KmaItem {
     #[serde(rename = "baseDate")]
     base_date: String,
