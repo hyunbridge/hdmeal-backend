@@ -157,6 +157,16 @@ pub enum CardButton {
 }
 
 // ----------------- Kakao response -----------------
+//
+// Kakao i Open Builder skill response 의 outputs 배열은 각 원소가
+//   `{ "<type>": { <content> } }` 형태의 key-wrapped 객체.
+// serde derive 로 정확히 표현하기 까다로워서 (key-value 쌍이 output type 으로
+// 결정되는 패턴), outputs 만 `serde_json::Value` 로 직접 빌드하고
+// `KakaoSkillResponse` 의 wrapper 는 그대로 derive Serialize.
+// 이렇게 하면:
+//   1. KakaoOutput/KakaoButton/... 등 별도 미러 타입이 필요 없음
+//   2. `Vec<Value> -> Vec<KakaoOutput>` 의 불필요한 직렬화/역직렬화 제거
+//   3. responses 매크로 / json! 가 곧 JSON 표현이라 코드와 결과가 1:1
 
 #[derive(Debug, Serialize)]
 pub struct KakaoSkillResponse {
@@ -166,58 +176,28 @@ pub struct KakaoSkillResponse {
 
 #[derive(Debug, Serialize)]
 pub struct KakaoTemplate {
-    pub outputs: Vec<KakaoOutput>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(tag = "simpleText", rename_all = "camelCase")]
-pub struct KakaoSimpleText {
-    pub text: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct KakaoThumbnail {
-    pub image_url: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "action", rename_all = "camelCase")]
-pub enum KakaoButton {
-    #[serde(rename = "webLink")]
-    WebLink { label: String, web_link_url: String },
-    #[serde(rename = "message")]
-    Message { label: String, message_text: String },
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct KakaoBasicCard {
-    pub title: String,
-    pub description: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub thumbnail: Option<KakaoThumbnail>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub buttons: Option<Vec<KakaoButton>>,
+    pub outputs: Vec<serde_json::Value>,
 }
 
 impl KakaoSkillResponse {
     pub fn from_messages(messages: Vec<Message>) -> Self {
-        let mut outputs: Vec<serde_json::Value> = Vec::new();
+        let mut outputs: Vec<serde_json::Value> = Vec::with_capacity(messages.len());
         for m in messages {
             match m {
                 Message::Text(text) => {
                     outputs.push(serde_json::json!({
-                        "simpleText": {"text": text}
+                        "simpleText": { "text": text }
                     }));
                 }
                 Message::Card(card) => {
-                    let mut bc = serde_json::json!({
-                        "title": card.title,
-                        "description": card.description,
-                    });
+                    let mut bc = serde_json::Map::with_capacity(4);
+                    bc.insert("title".into(), serde_json::Value::String(card.title));
+                    bc.insert(
+                        "description".into(),
+                        serde_json::Value::String(card.description),
+                    );
                     if let Some(url) = card.thumbnail_url {
-                        bc["thumbnail"] = serde_json::json!({"imageUrl": url});
+                        bc.insert("thumbnail".into(), serde_json::json!({ "imageUrl": url }));
                     }
                     if !card.buttons.is_empty() {
                         let buttons: Vec<serde_json::Value> = card
@@ -230,7 +210,7 @@ impl KakaoSkillResponse {
                                     "webLinkUrl": url,
                                 }),
                                 CardButton::Message { title, postback } => {
-                                    let text = postback.unwrap_or(title.clone());
+                                    let text = postback.unwrap_or_else(|| title.clone());
                                     serde_json::json!({
                                         "action": "message",
                                         "label": title,
@@ -239,39 +219,17 @@ impl KakaoSkillResponse {
                                 }
                             })
                             .collect();
-                        bc["buttons"] = serde_json::Value::Array(buttons);
+                        bc.insert("buttons".into(), serde_json::Value::Array(buttons));
                     }
-                    outputs.push(serde_json::json!({
-                        "basicCard": bc
-                    }));
+                    outputs.push(serde_json::json!({ "basicCard": bc }));
                 }
             }
         }
-        // serde_json::Value 로 모았다가 최종적으로 KakaoOutput 구조로 변환.
-        // 단순화를 위해 `outputs` 를 `Vec<KakaoOutput>` 으로 한 번 더 deserialize.
-        let outputs: Vec<KakaoOutput> =
-            serde_json::from_value(serde_json::Value::Array(outputs)).unwrap_or_default();
         Self {
             version: "2.0",
             template: KakaoTemplate { outputs },
         }
     }
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "camelCase")]
-pub enum KakaoOutput {
-    #[serde(rename = "simpleText")]
-    SimpleText { text: String },
-    #[serde(rename = "basicCard")]
-    BasicCard {
-        title: String,
-        description: String,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        thumbnail: Option<KakaoThumbnail>,
-        #[serde(skip_serializing_if = "Option::is_none")]
-        buttons: Option<Vec<KakaoButton>>,
-    },
 }
 
 // ----------------- Intent -----------------
