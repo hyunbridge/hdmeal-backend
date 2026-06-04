@@ -199,6 +199,30 @@ cargo run --release
 - OTel **metrics** SDK — 라벨 카디널리티가 낮고 카운터는 단순 hashmap으로 충분.
   현재 `/metrics` 엔드포인트는 자체 `Metrics` 구조체로 노출. 히스토그램이 필요해지면 `prometheus` 크레이트로 교체.
 
+## 배포(CI/CD)
+
+GitHub Actions로 amd64/arm64 Docker 이미지를 빌드/푸시합니다.
+
+### Container Registry (GHCR)
+
+이미지는 `ghcr.io/hyunbridge/hdmeal-backend:<tag>` 형태로 푸시됩니다.
+
+- `main` 브랜치 push 시 `main`, `sha`, `latest` 태그를 발행합니다.
+- `v*.*.*` 태그 push 시 semver 태그와 `latest` 태그를 발행합니다.
+
+### 런타임 환경변수
+
+런타임 환경변수는 서버 측 `.env` 파일에서 주입합니다. 주요 항목:
+
+- `MONGODB_URI`, `MONGODB_DATABASE`
+- `NEIS_OPENAPI_TOKEN`, `ATPT_OFCDC_SC_CODE`, `SD_SCHUL_CODE`
+- `NUM_OF_GRADES`, `NUM_OF_CLASSES`
+- `HDMeal_AuthTokens`, `HDMeal_JWTSecret`
+- `HDMeal_SeoulData_Token`, `HDMeal_KMA_ApiKey`, `HDMeal_KMA_NX`, `HDMeal_KMA_NY`
+- `HDMeal_BaseURL`
+- `HDMeal_AllowedOrigins`(선택)
+- `HDMeal_MaxDaysRange`(선택), `HDMeal_AppVersion`(선택), `HDMeal_AppBuild`(선택)
+
 ## License
 
 MIT
