@@ -2,34 +2,12 @@
 
 use chrono::{Datelike, NaiveDate, Weekday};
 
-use crate::application::chatbot::types::{KakaoSkillRequest, Message};
+use crate::application::chatbot::types::{parse_date, KakaoSkillRequest, Message, ALLERGY_LABELS};
 use crate::application::chatbot::Service;
 use crate::error::HDMealResult;
 use crate::shared::timezone::{format_date_label, today_kst_date};
 
 use super::sync_helpers::preload_day_bundle;
-
-const ALLERGY_LABELS: &[&str] = &[
-    "",
-    "난류",
-    "우유",
-    "메밀",
-    "땅콩",
-    "대두",
-    "밀",
-    "고등어",
-    "게",
-    "새우",
-    "돼지고기",
-    "복숭아",
-    "토마토",
-    "아황산류",
-    "호두",
-    "닭고기",
-    "쇠고기",
-    "오징어",
-    "조개류",
-];
 
 /// Meal: 단일 날짜의 중식.
 pub async fn handle_meal(
@@ -321,8 +299,4 @@ fn format_group_line(start: NaiveDate, end: NaiveDate, summary: &str) -> String 
             summary
         )
     }
-}
-
-fn parse_date(s: &str) -> Option<NaiveDate> {
-    NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()
 }

@@ -3,7 +3,9 @@
 use chrono::{Datelike, NaiveDate, Timelike, Weekday};
 
 use crate::application::chatbot::sync_helpers::preload_day_bundle;
-use crate::application::chatbot::types::{CardButton, CardMessage, KakaoSkillRequest, Message};
+use crate::application::chatbot::types::{
+    parse_date, CardButton, CardMessage, KakaoSkillRequest, Message, ALLERGY_LABELS,
+};
 use crate::application::chatbot::Service;
 use crate::domain::{MealDocument, ScheduleDocument, TimetableDocument, UserPreferences};
 use crate::error::HDMealResult;
@@ -180,32 +182,6 @@ pub async fn handle_timetable(
 
     Ok(vec![Message::Text(timetable_text)])
 }
-
-fn parse_date(s: &str) -> Option<NaiveDate> {
-    NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()
-}
-
-const ALLERGY_LABELS: &[&str] = &[
-    "",
-    "난류",
-    "우유",
-    "메밀",
-    "땅콩",
-    "대두",
-    "밀",
-    "고등어",
-    "게",
-    "새우",
-    "돼지고기",
-    "복숭아",
-    "토마토",
-    "아황산류",
-    "호두",
-    "닭고기",
-    "쇠고기",
-    "오징어",
-    "조개류",
-];
 
 fn weekday_ko(date: NaiveDate) -> &'static str {
     match date.weekday() {

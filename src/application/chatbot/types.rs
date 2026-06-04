@@ -2,7 +2,36 @@
 
 use std::collections::HashMap;
 
+use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
+
+// ----------------- Shared constants -----------------
+
+pub const ALLERGY_LABELS: &[&str] = &[
+    "",
+    "난류",
+    "우유",
+    "메밀",
+    "땅콩",
+    "대두",
+    "밀",
+    "고등어",
+    "게",
+    "새우",
+    "돼지고기",
+    "복숭아",
+    "토마토",
+    "아황산류",
+    "호두",
+    "닭고기",
+    "쇠고기",
+    "오징어",
+    "조개류",
+];
+
+pub fn parse_date(s: &str) -> Option<NaiveDate> {
+    NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()
+}
 
 // ----------------- Kakao request -----------------
 
@@ -262,10 +291,9 @@ pub enum IntentKind {
 impl IntentKind {
     /// intent name 으로부터 어떤 kind 인지 판정. substring + 우선순위.
     pub fn from_name(name: &str) -> Self {
-        // 우선순위: 더 긴 substring 부터 (예: "ModifyUserInfo" 가 "UserInfo" 보다 먼저 매칭되어야 함)
-        // 단, Go 의 `normalizeIntent` 는 단순 contains 라는 점에 주의. 핵심 7개가 모두
-        // disjoint 한 한 단어를 포함하므로 단순 contains 로 충분하다.
-        if name.contains("Briefing") {
+        if name.contains("ModifyUserInfo") {
+            Self::ModifyUserInfo
+        } else if name.contains("Briefing") {
             Self::Briefing
         } else if name.contains("Meal") {
             Self::Meal
@@ -277,8 +305,6 @@ impl IntentKind {
             Self::WaterTemperature
         } else if name.contains("UserSettings") {
             Self::UserSettings
-        } else if name.contains("ModifyUserInfo") {
-            Self::ModifyUserInfo
         } else {
             Self::Unknown
         }
