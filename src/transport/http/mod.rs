@@ -164,7 +164,7 @@ pub mod handlers {
 
     use mongodb::Client as MongoClient;
     use warp::http::StatusCode;
-    use warp::reply::{json, with_status, Reply as _};
+    use warp::reply::{json, with_header, with_status, Reply as _};
 
     use crate::shared::metrics::Metrics;
     use crate::shared::observability::RequestContext;
@@ -220,12 +220,12 @@ pub mod handlers {
         ctx: RequestContext,
     ) -> Result<warp::reply::Response, Infallible> {
         let body = m.render();
-        let resp = warp::http::Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", "text/plain; version=0.0.4")
-            .body(warp::hyper::Body::from(body))
-            .unwrap();
-        let resp = resp.into_response();
+        let resp = with_header(
+            with_status(body, StatusCode::OK),
+            "Content-Type",
+            "text/plain; version=0.0.4",
+        )
+        .into_response();
         Ok(finalize_reply(&ctx, resp))
     }
 }

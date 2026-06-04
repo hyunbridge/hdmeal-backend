@@ -13,13 +13,17 @@ use opentelemetry::KeyValue;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::Sampler;
+use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_sdk::Resource;
+use std::sync::OnceLock;
 use std::time::Duration;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::EnvFilter;
 
 use crate::shared::context::{new_request_id, normalize_request_id};
+
+static TRACE_PROVIDER: OnceLock<SdkTracerProvider> = OnceLock::new();
 
 /// 한 요청 동안 핸들러로 전달되는 컨텍스트.
 #[derive(Debug, Clone)]
@@ -38,10 +42,12 @@ pub fn init(app_name: &str, otel_endpoint: Option<&str>) -> anyhow::Result<()> {
         .with_level(true);
 
     if let Some(endpoint) = otel_endpoint {
-        let resource = Resource::new(vec![
-            KeyValue::new("service.name", app_name.to_string()),
-            KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
-        ]);
+        let resource = Resource::builder_empty()
+            .with_attributes(vec![
+                KeyValue::new("service.name", app_name.to_string()),
+                KeyValue::new("service.version", env!("CARGO_PKG_VERSION")),
+            ])
+            .build();
 
         let exporter = opentelemetry_otlp::SpanExporter::builder()
             .with_tonic()
@@ -49,17 +55,16 @@ pub fn init(app_name: &str, otel_endpoint: Option<&str>) -> anyhow::Result<()> {
             .with_timeout(Duration::from_secs(5))
             .build()?;
 
-        let provider = opentelemetry_sdk::trace::TracerProvider::builder()
-            .with_batch_exporter(exporter, opentelemetry_sdk::runtime::Tokio)
+        let provider = SdkTracerProvider::builder()
+            .with_batch_exporter(exporter)
             .with_sampler(Sampler::AlwaysOn)
             .with_resource(resource)
             .build();
 
+        let _ = TRACE_PROVIDER.set(provider.clone());
         let tracer = provider.tracer(app_name.to_string());
         global::set_tracer_provider(provider);
-        // W3C TraceContext propagator (traceparent / tracestate).
-        // Baggage propagation 은 향후 작업으로 분리 — opentelemetry_sdk 0.27 에
-        // 내장 CompositePropagator 가 없어 별도 wrapper 구현이 필요함.
+        // W3C TraceContext propagator (traceparent / tracestate) only.
         global::set_text_map_propagator(TraceContextPropagator::new());
 
         let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
@@ -81,7 +86,9 @@ pub fn init(app_name: &str, otel_endpoint: Option<&str>) -> anyhow::Result<()> {
 
 /// Shutdown 시 exporter flush.
 pub fn shutdown() {
-    global::shutdown_tracer_provider();
+    if let Some(provider) = TRACE_PROVIDER.get() {
+        let _ = provider.shutdown();
+    }
 }
 
 /// 들어오는 헤더에서 parent OTel context 추출.

@@ -7,7 +7,6 @@
 
 use std::time::Duration;
 
-use rand::Rng;
 use reqwest::header::{HeaderMap, RETRY_AFTER};
 use reqwest::{Client, Response, StatusCode};
 use tokio::time::sleep;
@@ -141,7 +140,7 @@ impl HttpClient {
     fn compute_delay_no_header(&self, attempt: u32) -> Duration {
         let base = self.policy.base_delay.as_millis() as u64;
         let exp = base.saturating_mul(1u64 << attempt);
-        let jitter = rand::thread_rng().gen_range(0..base.max(1));
+        let jitter = rand::random_range(0..base.max(1));
         Duration::from_millis(exp + jitter)
     }
 }

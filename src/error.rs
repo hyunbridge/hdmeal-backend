@@ -45,11 +45,8 @@ pub enum HDMealError {
     #[error("mongo: {0}")]
     Mongo(#[from] mongodb::error::Error),
 
-    #[error("bson serialize: {0}")]
-    BsonSer(#[from] bson::ser::Error),
-
-    #[error("bson deserialize: {0}")]
-    BsonDe(#[from] bson::de::Error),
+    #[error("bson: {0}")]
+    Bson(#[from] bson::error::Error),
 
     #[error("serde_json: {0}")]
     Json(#[from] serde_json::Error),
@@ -95,12 +92,9 @@ impl HDMealError {
             Self::Forbidden(_) => StatusCode::FORBIDDEN,
             Self::NotFound(_) => StatusCode::NOT_FOUND,
             Self::ServiceUnavailable(_) | Self::Http(_) => StatusCode::SERVICE_UNAVAILABLE,
-            Self::Mongo(_)
-            | Self::BsonSer(_)
-            | Self::BsonDe(_)
-            | Self::Internal(_)
-            | Self::Io(_)
-            | Self::Url(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::Mongo(_) | Self::Bson(_) | Self::Internal(_) | Self::Io(_) | Self::Url(_) => {
+                StatusCode::INTERNAL_SERVER_ERROR
+            }
         }
     }
 

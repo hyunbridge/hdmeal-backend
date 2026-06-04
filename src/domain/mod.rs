@@ -2,15 +2,35 @@
 //!
 //! 컬렉션 6 종 (meals, schedules, timetables, weather, water_temperatures, users)
 //! 과 그 내부 타입들. BSON 직렬화는
-//! [`bson::serde_helpers`] 의 헬퍼를 사용해 `chrono::DateTime<Utc>` 를
+//! 로컬 헬퍼 [`chrono_datetime_as_bson_datetime`] 로 `chrono::DateTime<Utc>` 를
 //! BSON `DateTime` 으로 저장합니다. HTTP 응답 DTO 는
 //! [`crate::transport::http::dto`] 에 별도로 둡니다.
 
 use std::collections::BTreeMap;
 
-use bson::serde_helpers::chrono_datetime_as_bson_datetime;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+
+mod chrono_datetime_as_bson_datetime {
+    use bson::DateTime as BsonDateTime;
+    use chrono::{DateTime, Utc};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S>(value: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        BsonDateTime::from_chrono(*value).serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = BsonDateTime::deserialize(deserializer)?;
+        Ok(value.to_chrono())
+    }
+}
 
 /// `meals` 컬렉션.
 #[derive(Debug, Clone, Serialize, Deserialize)]

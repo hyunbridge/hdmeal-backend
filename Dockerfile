@@ -1,5 +1,5 @@
 # ---- builder ----
-FROM rust:1.83-slim-bookworm AS builder
+FROM rust:1.88-slim-trixie AS builder
 
 WORKDIR /app
 
@@ -20,7 +20,9 @@ COPY data ./data
 RUN cargo build --release --bin hdmeal-backend
 
 # ---- runtime ----
-FROM debian:bookworm-slim AS runtime
+# distroless/cc-debian13: glibc + libgcc + ca-certificates + /etc/passwd(/etc/group)
+# 패키지 매니저 / shell 없음 → 최소 attack surface. tini 불필요 (k8s/container runtime init 사용).
+FROM gcr.io/distroless/cc-debian13:nonroot AS runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates tini \
