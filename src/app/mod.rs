@@ -45,7 +45,8 @@ pub async fn run() -> anyhow::Result<()> {
         config.clone(),
     ));
 
-    // 시작 시: today-1 ~ today+10 미리 sync (Go 와 동일)
+    // 시작 시: today-1 ~ today+10 미리 sync.
+    // 배치 upsert 로 N×1 round-trip → 3 round-trip 으로 축소.
     {
         let neis = neis.clone();
         let data = data.clone();
@@ -54,14 +55,23 @@ pub async fn run() -> anyhow::Result<()> {
         let res = tokio::time::timeout(Duration::from_secs(60), async move {
             match neis.fetch_all(start, end).await {
                 Ok(fetched) => {
-                    for m in fetched.meals {
-                        let _ = data.upsert_meal(&m).await;
+                    let n_meals = fetched.meals.len();
+                    let n_schedules = fetched.schedules.len();
+                    let n_timetables = fetched.timetables.len();
+                    if let Err(e) = data.upsert_meals_batch(&fetched.meals).await {
+                        tracing::warn!(error = %e, count = n_meals, "warmup: meals bulk upsert failed");
+                    } else {
+                        tracing::debug!(count = n_meals, "warmup: meals bulk upsert ok");
                     }
-                    for s in fetched.schedules {
-                        let _ = data.upsert_schedule(&s).await;
+                    if let Err(e) = data.upsert_schedules_batch(&fetched.schedules).await {
+                        tracing::warn!(error = %e, count = n_schedules, "warmup: schedules bulk upsert failed");
+                    } else {
+                        tracing::debug!(count = n_schedules, "warmup: schedules bulk upsert ok");
                     }
-                    for t in fetched.timetables {
-                        let _ = data.upsert_timetable(&t).await;
+                    if let Err(e) = data.upsert_timetables_batch(&fetched.timetables).await {
+                        tracing::warn!(error = %e, count = n_timetables, "warmup: timetables bulk upsert failed");
+                    } else {
+                        tracing::debug!(count = n_timetables, "warmup: timetables bulk upsert ok");
                     }
                 }
                 Err(e) => tracing::warn!(error = %e, "initial warmup failed"),

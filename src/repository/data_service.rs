@@ -104,15 +104,35 @@ impl DataService {
         Ok(out)
     }
 
-    pub async fn upsert_meal(&self, doc: &MealDocument) -> HDMealResult<()> {
-        let filter = doc! {"date": &doc.date};
-        let replacement_doc = bson::to_document(doc)?;
+    pub async fn upsert_meal(&self, meal: &MealDocument) -> HDMealResult<()> {
+        let filter = doc! {"date": &meal.date};
         self.coll
             .meals
-            .find_one_and_replace(filter, doc)
+            .find_one_and_replace(filter, meal)
             .upsert(true)
             .await?;
-        let _ = replacement_doc;
+        Ok(())
+    }
+
+    /// 여러 [`MealDocument`] 를 배치 upsert — `delete_many(date range)` + `insert_many`.
+    ///
+    /// N×1 round-trip → 2 round-trip. warmup 과 sync_window 의 주된 성능
+    /// 병목 (NEIS 12일치 × 3 컬렉션 = 36 round-trip) 을 ~6 round-trip 으로 축소.
+    /// mongodb 8.0+ 의 `Client::bulk_write` 는 도입 시 한 단계 더 줄일 여지가 있다.
+    ///
+    /// 트레이드오프:
+    /// - 장점: MongoDB 6.x+ 모두 호환 (8.0 종속 없음).
+    /// - 단점: `date` 가 unique 인덱스이므로 같은 `_id` 를 가진 다른 collection 의
+    ///   `users` 와는 충돌 없음. 단 `date` range 가 정확히 일치해야 함 (sync_window
+    ///   가 항상 `start..=end` 전체를 다시 쓰는 warmup semantics 와 일치).
+    pub async fn upsert_meals_batch(&self, meals: &[MealDocument]) -> HDMealResult<()> {
+        if meals.is_empty() {
+            return Ok(());
+        }
+        let dates: Vec<&str> = meals.iter().map(|m| m.date.as_str()).collect();
+        let filter = doc! {"date": {"$in": &dates}};
+        self.coll.meals.delete_many(filter).await?;
+        self.coll.meals.insert_many(meals).ordered(false).await?;
         Ok(())
     }
 
@@ -143,6 +163,22 @@ impl DataService {
             .schedules
             .find_one_and_replace(filter, schedule)
             .upsert(true)
+            .await?;
+        Ok(())
+    }
+
+    /// [`upsert_meals_batch`] 와 동일 패턴. 12일치 일정.
+    pub async fn upsert_schedules_batch(&self, schedules: &[ScheduleDocument]) -> HDMealResult<()> {
+        if schedules.is_empty() {
+            return Ok(());
+        }
+        let dates: Vec<&str> = schedules.iter().map(|s| s.date.as_str()).collect();
+        let filter = doc! {"date": {"$in": &dates}};
+        self.coll.schedules.delete_many(filter).await?;
+        self.coll
+            .schedules
+            .insert_many(schedules)
+            .ordered(false)
             .await?;
         Ok(())
     }
@@ -181,25 +217,41 @@ impl DataService {
         Ok(())
     }
 
+    /// [`upsert_meals_batch`] 와 동일 패턴. 12일치 시간표.
+    pub async fn upsert_timetables_batch(
+        &self,
+        timetables: &[TimetableDocument],
+    ) -> HDMealResult<()> {
+        if timetables.is_empty() {
+            return Ok(());
+        }
+        let dates: Vec<&str> = timetables.iter().map(|t| t.date.as_str()).collect();
+        let filter = doc! {"date": {"$in": &dates}};
+        self.coll.timetables.delete_many(filter).await?;
+        self.coll
+            .timetables
+            .insert_many(timetables)
+            .ordered(false)
+            .await?;
+        Ok(())
+    }
+
     /// 비어있는 시간표 스켈레톤. 매번 deep copy 한 인스턴스를 반환.
     pub fn empty_timetable(&self) -> BTreeMap<String, BTreeMap<String, Vec<String>>> {
-        let mut out = BTreeMap::new();
-        for (g, inner) in self.empty_timetable.iter() {
-            let mut new_inner = BTreeMap::new();
-            for (c, _) in inner.iter() {
-                new_inner.insert(c.clone(), Vec::new());
-            }
-            out.insert(g.clone(), new_inner);
-        }
-        out
+        self.empty_timetable
+            .iter()
+            .map(|(g, inner)| {
+                (
+                    g.clone(),
+                    inner.keys().map(|c| (c.clone(), Vec::new())).collect(),
+                )
+            })
+            .collect()
     }
 
     // ---------- Weather ----------
 
-    pub async fn get_latest_weather(
-        &self,
-        _before: DateTime<Utc>,
-    ) -> HDMealResult<Option<WeatherDocument>> {
+    pub async fn get_latest_weather(&self) -> HDMealResult<Option<WeatherDocument>> {
         let opts = mongodb::options::FindOneOptions::builder()
             .sort(doc! {"timestamp": -1})
             .build();
