@@ -1,13 +1,10 @@
 //! HTTP 핸들러 ↔ 직렬화/역직렬화 통합 테스트.
 
-use hdmeal_backend::application::chatbot::types::{
-    DatePeriod, IntentKind, KakaoAction, KakaoIntent, KakaoSkillRequest, KakaoUser,
-    KakaoUserRequest, Message,
-};
-use hdmeal_backend::error::{HDMealError, HDMealResult};
+use hdmeal_backend::application::chatbot::types::{IntentKind, KakaoAction, KakaoSkillRequest};
+use hdmeal_backend::error::HDMealError;
 use hdmeal_backend::shared::security::{scope, IssueUserTokenInput, ValidateUserTokenInput};
 use hdmeal_backend::shared::timezone::{
-    format_date_label, format_hour, kst_midnight_to_utc, today_kst_date, KST,
+    format_date_label, format_hour, kst_midnight_to_utc, today_kst_date,
 };
 use hdmeal_backend::transport::http::dto::user_settings::UpdateUserSettingsRequest;
 use std::collections::HashMap;

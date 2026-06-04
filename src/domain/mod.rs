@@ -12,14 +12,6 @@ use bson::serde_helpers::chrono_datetime_as_bson_datetime;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-/// Mongo 의 `_id` 필드 헬퍼. 빈 문자열이면 직렬화하지 않습니다.
-const fn empty_string_skip() -> bool {
-    true
-}
-
-#[allow(dead_code)]
-const _DOC: bool = empty_string_skip();
-
 /// `meals` 컬렉션.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MealDocument {

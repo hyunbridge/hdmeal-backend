@@ -11,8 +11,8 @@ use opentelemetry::global;
 use opentelemetry::trace::TracerProvider as _;
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::propagation::{BaggagePropagator, TraceContextPropagator};
-use opentelemetry_sdk::trace::{Config as TraceConfig, Sampler};
+use opentelemetry_sdk::propagation::TraceContextPropagator;
+use opentelemetry_sdk::trace::Sampler;
 use opentelemetry_sdk::Resource;
 use std::time::Duration;
 use tracing_subscriber::layer::SubscriberExt;
@@ -51,20 +51,16 @@ pub fn init(app_name: &str, otel_endpoint: Option<&str>) -> anyhow::Result<()> {
 
         let provider = opentelemetry_sdk::trace::TracerProvider::builder()
             .with_batch_exporter(exporter, opentelemetry_sdk::runtime::Tokio)
-            .with_config(
-                TraceConfig::default()
-                    .with_sampler(Sampler::AlwaysOn)
-                    .with_resource(resource),
-            )
+            .with_sampler(Sampler::AlwaysOn)
+            .with_resource(resource)
             .build();
 
         let tracer = provider.tracer(app_name.to_string());
         global::set_tracer_provider(provider);
+        // W3C TraceContext propagator (traceparent / tracestate).
+        // Baggage propagation 은 향후 작업으로 분리 — opentelemetry_sdk 0.27 에
+        // 내장 CompositePropagator 가 없어 별도 wrapper 구현이 필요함.
         global::set_text_map_propagator(TraceContextPropagator::new());
-        // Baggage 를 추가로 결합 (W3C 권장). TraceContextPropagator 가
-        // 이미 traceparent / tracestate 를 다루므로 두 propagator 를 함께 두면
-        // baggage 만 추가로 전파된다.
-        let _ = BaggagePropagator::new();
 
         let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
 

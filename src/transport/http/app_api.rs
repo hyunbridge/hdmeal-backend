@@ -83,9 +83,9 @@ async fn handle_days(
         ctx.data.get_timetables_in_range(&start_str, &end_str),
     );
 
-    let meals = meals.map_err(HDMealError::from)?;
-    let schedules = schedules.map_err(HDMealError::from)?;
-    let timetables = timetables.map_err(HDMealError::from)?;
+    let meals = meals?;
+    let schedules = schedules?;
+    let timetables = timetables?;
 
     let meals_by: std::collections::HashMap<_, _> =
         meals.into_iter().map(|m| (m.date.clone(), m)).collect();
@@ -150,9 +150,9 @@ async fn handle_day(
         ctx.data.get_schedule_by_date(&d_str),
         ctx.data.get_timetable_by_date(&d_str),
     );
-    let meal = meal.map_err(HDMealError::from)?;
-    let schedule = schedule.map_err(HDMealError::from)?;
-    let timetable = timetable.map_err(HDMealError::from)?;
+    let meal = meal?;
+    let schedule = schedule?;
+    let timetable = timetable?;
 
     let timetable = match timetable {
         Some(t) => t.into_view(),
