@@ -19,6 +19,14 @@ use crate::transport::http;
 
 /// 모든 초기화 + 서버 시작.
 pub async fn run() -> anyhow::Result<()> {
+    // rustls crypto provider 설치 (reqwest `rustls-no-provider` feature 대응).
+    // mongodb 는 provider 를 명시적으로 builder 에 넘기므로 의존하지 않지만,
+    // reqwest / opentelemetry-otlp (gRPC) 등이 process-wide default provider 를 사용한다.
+    // OTLP exporter 가 https endpoint 로 export 할 수 있으므로 observability::init 보다 먼저 호출.
+    // idempotent: 이미 설치된 경우 Err 를 무시. ring 은 mongodb 의 `rustls-tls` 가 활성화하므로
+    // 정확히 하나의 provider 만 활성화 → rustls 의 `get_default_or_install_from_crate_features` 와도 호환.
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let config = AppConfig::from_env()?;
     observability::init(&config.app_name, config.otel_endpoint.as_deref())?;
 
