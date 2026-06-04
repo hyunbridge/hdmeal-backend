@@ -5,6 +5,7 @@
 
 use std::future::Future;
 use std::panic::AssertUnwindSafe;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -17,6 +18,7 @@ pub struct PeriodicTask {
     interval: Duration,
     state: Arc<Mutex<State>>,
     notify_stop: Arc<Notify>,
+    stop_requested: Arc<AtomicBool>,
 }
 
 struct State {
@@ -29,6 +31,7 @@ impl PeriodicTask {
             interval,
             state: Arc::new(Mutex::new(State { handle: None })),
             notify_stop: Arc::new(Notify::new()),
+            stop_requested: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -42,9 +45,14 @@ impl PeriodicTask {
         if state.handle.is_some() {
             return;
         }
+        self.stop_requested.store(false, Ordering::SeqCst);
         let interval = self.interval;
         let notify = self.notify_stop.clone();
+        let stop_requested = self.stop_requested.clone();
         let handle = tokio::spawn(async move {
+            if stop_requested.load(Ordering::SeqCst) {
+                return;
+            }
             // 시작 시점에 즉시 1회 실행.
             if let Err(e) = AssertUnwindSafe(tick_fn()).catch_unwind().await {
                 tracing::error!(error = ?e, "periodic task initial tick panicked");
@@ -52,9 +60,15 @@ impl PeriodicTask {
             let mut ticker = tokio::time::interval(interval);
             ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
+                if stop_requested.load(Ordering::SeqCst) {
+                    break;
+                }
                 tokio::select! {
                     _ = notify.notified() => break,
                     _ = ticker.tick() => {
+                        if stop_requested.load(Ordering::SeqCst) {
+                            break;
+                        }
                         if let Err(e) = AssertUnwindSafe(tick_fn()).catch_unwind().await {
                             tracing::error!(error = ?e, "periodic task tick panicked");
                         }
@@ -68,6 +82,7 @@ impl PeriodicTask {
     /// 작업 취소. future 가 즉시 반환되지만, 현재 진행 중인 tick 은 완료될 때까지
     /// 대기합니다.
     pub async fn stop(&self) {
+        self.stop_requested.store(true, Ordering::SeqCst);
         let handle = {
             let mut state = self.state.lock();
             self.notify_stop.notify_waiters();
