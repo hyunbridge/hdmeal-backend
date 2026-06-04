@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use chrono::Utc;
 use warp::http::StatusCode;
 use warp::reply::{json, with_status, Reply as _};
 use warp::Filter;
@@ -254,7 +253,6 @@ async fn handle_cache_healthcheck(
 ) -> Result<warp::reply::Response, warp::Rejection> {
     use crate::application::ingestion_service::is_fresh;
 
-    let now = Utc::now();
     let today = crate::shared::timezone::today_kst_date();
     let timetable = match ctx
         .data
@@ -269,7 +267,7 @@ async fn handle_cache_healthcheck(
         Err(_) => CacheHealthcheckStatus::NotFound,
     };
 
-    let weather = match ctx.data.get_latest_weather(now).await {
+    let weather = match ctx.data.get_latest_weather().await {
         Ok(Some(w)) if is_fresh(w.created_at, ctx.config.cache_health_weather_ttl) => {
             CacheHealthcheckStatus::Valid
         }
@@ -277,7 +275,7 @@ async fn handle_cache_healthcheck(
         Ok(None) => CacheHealthcheckStatus::NotFound,
         Err(_) => CacheHealthcheckStatus::NotFound,
     };
-    let water = match ctx.data.get_latest_water_temperature(now).await {
+    let water = match ctx.data.get_latest_water_temperature().await {
         Ok(Some(w)) if is_fresh(w.created_at, ctx.config.cache_health_water_temp_ttl) => {
             CacheHealthcheckStatus::Valid
         }

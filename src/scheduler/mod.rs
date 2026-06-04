@@ -68,9 +68,12 @@ impl PeriodicTask {
     /// 작업 취소. future 가 즉시 반환되지만, 현재 진행 중인 tick 은 완료될 때까지
     /// 대기합니다.
     pub async fn stop(&self) {
-        let mut state = self.state.lock();
-        self.notify_stop.notify_waiters();
-        if let Some(h) = state.handle.take() {
+        let handle = {
+            let mut state = self.state.lock();
+            self.notify_stop.notify_waiters();
+            state.handle.take()
+        };
+        if let Some(h) = handle {
             let _ = h.await;
         }
     }

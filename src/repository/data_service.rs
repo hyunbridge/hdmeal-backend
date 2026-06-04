@@ -87,8 +87,7 @@ impl DataService {
     // ---------- Meals ----------
 
     pub async fn get_meal_by_date(&self, date: &str) -> HDMealResult<Option<MealDocument>> {
-        let res = self.coll.meals.find_one(doc! {"date": date}).await?;
-        Ok(res)
+        Ok(self.coll.meals.find_one(doc! {"date": date}).await?)
     }
 
     pub async fn get_meals_in_range(
@@ -258,7 +257,6 @@ impl DataService {
 
     pub async fn get_latest_water_temperature(
         &self,
-        _before: DateTime<Utc>,
     ) -> HDMealResult<Option<WaterTemperatureDocument>> {
         let opts = mongodb::options::FindOneOptions::builder()
             .sort(doc! {"timestamp": -1})
@@ -355,7 +353,6 @@ impl DataService {
         class_no: Option<Option<i32>>,
         allergy_info: Option<String>,
     ) -> HDMealResult<UserDocument> {
-        // 먼저 EnsureUser 로 존재 보장.
         let _ = self.ensure_user(platform, external_id).await?;
 
         let now = Utc::now();
@@ -364,13 +361,13 @@ impl DataService {
         if let Some(g) = grade {
             set.insert(
                 "grade",
-                g.map(|v| bson::Bson::Int32(v)).unwrap_or(bson::Bson::Null),
+                g.map(bson::Bson::Int32).unwrap_or(bson::Bson::Null),
             );
         }
         if let Some(c) = class_no {
             set.insert(
                 "class_no",
-                c.map(|v| bson::Bson::Int32(v)).unwrap_or(bson::Bson::Null),
+                c.map(bson::Bson::Int32).unwrap_or(bson::Bson::Null),
             );
         }
         if let Some(a) = allergy_info {
@@ -398,24 +395,22 @@ impl DataService {
             .await?;
         Ok(res.deleted_count > 0)
     }
-
-    // `MealUpsert` / `ScheduleUpsert` / `TimetableUpsert` / `WeatherUpsert` 같은
-    // 입력 helper 가 아래에 정의되어 있습니다.
 }
 
 fn build_empty_timetable(
     num_grades: u32,
     num_classes: u32,
 ) -> BTreeMap<String, BTreeMap<String, Vec<String>>> {
-    let mut out = BTreeMap::new();
-    for g in 1..=num_grades {
-        let mut inner = BTreeMap::new();
-        for c in 1..=num_classes {
-            inner.insert(c.to_string(), Vec::new());
-        }
-        out.insert(g.to_string(), inner);
-    }
-    out
+    (1..=num_grades)
+        .map(|g| {
+            (
+                g.to_string(),
+                (1..=num_classes)
+                    .map(|c| (c.to_string(), Vec::new()))
+                    .collect(),
+            )
+        })
+        .collect()
 }
 
 #[derive(Debug, Clone)]
@@ -428,19 +423,4 @@ pub struct WeatherUpsert {
     pub precip_probability: String,
     pub humidity: String,
     pub first_hour: String,
-}
-
-#[allow(dead_code)]
-fn _unused() {
-    let _ = ScheduleDocument {
-        id: String::new(),
-        date: String::new(),
-        entries: vec![ScheduleEntry {
-            name: String::new(),
-            grades: vec![],
-        }],
-        summary: None,
-        created_at: Utc::now(),
-    };
-    let _ = UserPreferences::default();
 }
