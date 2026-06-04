@@ -1,0 +1,7 @@
+# HDMeal 백엔드 (Rust) — 안정(stable) rustfmt 설정.
+# nightly-only 옵션 (`imports_granularity`, `group_imports`) 은 CI 안정성을
+# 위해 사용하지 않는다.
+
+edition = "2021"
+max_width = 100
+reorder_imports = true
