@@ -125,14 +125,29 @@ impl IngestionService {
         data: &DataService,
         fetched: &crate::infrastructure::neis::neis::NeisFetchAll,
     ) {
-        if let Err(e) = data.upsert_meals_batch(&fetched.meals).await {
+        // 3 컬렉션을 병렬 upsert. Mongo connection pool 이 충분히 크므로
+        // round-trip latency 가 직렬 → 3-way overlap 으로 줄어듦.
+        let (meals_res, schedules_res, timetables_res) = tokio::join!(
+            data.upsert_meals_batch(&fetched.meals),
+            data.upsert_schedules_batch(&fetched.schedules),
+            data.upsert_timetables_batch(&fetched.timetables),
+        );
+        if let Err(e) = meals_res {
             tracing::warn!(error = %e, count = fetched.meals.len(), "upsert_meals_batch failed");
         }
-        if let Err(e) = data.upsert_schedules_batch(&fetched.schedules).await {
-            tracing::warn!(error = %e, count = fetched.schedules.len(), "upsert_schedules_batch failed");
+        if let Err(e) = schedules_res {
+            tracing::warn!(
+                error = %e,
+                count = fetched.schedules.len(),
+                "upsert_schedules_batch failed"
+            );
         }
-        if let Err(e) = data.upsert_timetables_batch(&fetched.timetables).await {
-            tracing::warn!(error = %e, count = fetched.timetables.len(), "upsert_timetables_batch failed");
+        if let Err(e) = timetables_res {
+            tracing::warn!(
+                error = %e,
+                count = fetched.timetables.len(),
+                "upsert_timetables_batch failed"
+            );
         }
     }
 
