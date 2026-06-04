@@ -13,6 +13,7 @@ use crate::infrastructure::neis::http_client::HttpClient;
 use crate::infrastructure::neis::neis::NeisClient;
 use crate::repository::DataService;
 use crate::scheduler::PeriodicTask;
+use crate::shared::metrics::Metrics;
 use crate::shared::observability;
 use crate::transport::http;
 
@@ -96,7 +97,13 @@ pub async fn run() -> anyhow::Result<()> {
     });
 
     // HTTP 서버
-    let router = http::build_router(config.clone(), ctx.clone());
+    let metrics = Arc::new(Metrics::new());
+    let router = http::build_router(
+        config.clone(),
+        ctx.clone(),
+        metrics.clone(),
+        mongo_client.clone(),
+    );
     let addr: SocketAddr = ([0, 0, 0, 0], config.port).into();
     tracing::info!(%addr, "HTTP server listening");
 
