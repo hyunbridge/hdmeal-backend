@@ -60,9 +60,10 @@ pub fn routes(
         .and(warp::body::json())
         .and(warp::any().map(move || ctx_patch.clone()))
         .and(warp::header::headers_cloned())
+        .and(warp::query::<HashMap<String, String>>())
         .and(request_context_filter())
-        .and_then(move |req, ctx, headers, rc| async move {
-            handle_patch_user_settings(ctx, headers, rc, req).await
+        .and_then(move |req, ctx, headers, query, rc| async move {
+            handle_patch_user_settings(ctx, headers, query, rc, req).await
         });
 
     let delete_user = warp::path("user")
@@ -71,9 +72,10 @@ pub fn routes(
         .and(warp::delete())
         .and(warp::any().map(move || ctx_delete.clone()))
         .and(warp::header::headers_cloned())
+        .and(warp::query::<HashMap<String, String>>())
         .and(request_context_filter())
-        .and_then(move |ctx, headers, rc| async move {
-            handle_delete_user_settings(ctx, headers, rc).await
+        .and_then(move |ctx, headers, query, rc| async move {
+            handle_delete_user_settings(ctx, headers, query, rc).await
         });
 
     let cache_health = warp::path("cache")
@@ -95,30 +97,16 @@ pub fn routes(
         .unify()
 }
 
-fn extract_token(headers: &warp::http::HeaderMap) -> Option<String> {
-    if let Some(v) = headers.get("X-HDMeal-Token") {
-        if let Ok(s) = v.to_str() {
-            let token = s.trim();
-            if !token.is_empty() {
-                return Some(token.to_string());
-            }
-        }
-    }
-    // Authorization: Bearer <token>
-    if let Some(v) = headers.get("authorization") {
-        if let Ok(s) = v.to_str() {
-            if let Some(rest) = s.strip_prefix("Bearer ") {
-                let token = rest.trim();
-                if !token.is_empty() {
-                    return Some(token.to_string());
-                }
-            }
-        }
-    }
-    None
-}
-
-fn extract_user_token(headers: &warp::http::HeaderMap) -> Option<String> {
+/// 통합 토큰 추출: 모든 인증 엔드포인트에서 동일한 우선순위로 토큰을 찾는다.
+///
+/// 우선순위 (보안상 안전한 순서):
+///   1. `X-HDMeal-Token` 헤더
+///   2. `Authorization: Bearer <token>` 헤더
+///   3. `?token=` 쿼리 (proxy 로그에 남으므로 최후 수단)
+fn extract_token(
+    headers: &warp::http::HeaderMap,
+    query: &HashMap<String, String>,
+) -> Option<String> {
     if let Some(v) = headers.get("X-HDMeal-Token") {
         if let Ok(s) = v.to_str() {
             let token = s.trim();
@@ -137,29 +125,11 @@ fn extract_user_token(headers: &warp::http::HeaderMap) -> Option<String> {
             }
         }
     }
-    None
-}
-
-fn extract_query_token(query: &HashMap<String, String>) -> Option<String> {
     query
         .get("token")
         .map(|s| s.trim())
         .filter(|s| !s.is_empty())
         .map(ToString::to_string)
-}
-
-fn extract_skill_token(
-    headers: &warp::http::HeaderMap,
-    query: &HashMap<String, String>,
-) -> Option<String> {
-    extract_token(headers).or_else(|| extract_query_token(query))
-}
-
-fn extract_user_settings_token(
-    headers: &warp::http::HeaderMap,
-    query: &HashMap<String, String>,
-) -> Option<String> {
-    extract_query_token(query).or_else(|| extract_user_token(headers))
 }
 
 async fn handle_skill(
@@ -169,7 +139,7 @@ async fn handle_skill(
     rc: RequestContext,
     req: KakaoSkillRequest,
 ) -> Result<warp::reply::Response, warp::Rejection> {
-    let token = extract_skill_token(&headers, &query);
+    let token = extract_token(&headers, &query);
     if !authorize_skill_token(token.as_deref(), &ctx.config.auth_tokens) {
         return Err(HDMealError::unauthorized("Unauthorized").into());
     }
@@ -185,7 +155,7 @@ async fn handle_get_user_settings(
     query: HashMap<String, String>,
     rc: RequestContext,
 ) -> Result<warp::reply::Response, warp::Rejection> {
-    let token = extract_user_settings_token(&headers, &query)
+    let token = extract_token(&headers, &query)
         .ok_or_else(|| HDMealError::unauthorized("토큰이 없습니다."))?;
     let claims = validate_user_token(ValidateUserTokenInput {
         token: &token,
@@ -216,10 +186,11 @@ async fn handle_get_user_settings(
 async fn handle_patch_user_settings(
     ctx: Arc<AppContext>,
     headers: warp::http::HeaderMap,
+    query: HashMap<String, String>,
     rc: RequestContext,
     req: UpdateUserSettingsRequest,
 ) -> Result<warp::reply::Response, warp::Rejection> {
-    let token = extract_user_token(&headers)
+    let token = extract_token(&headers, &query)
         .ok_or_else(|| HDMealError::unauthorized("토큰이 없습니다."))?;
     let claims = validate_user_token(ValidateUserTokenInput {
         token: &token,
@@ -253,9 +224,10 @@ async fn handle_patch_user_settings(
 async fn handle_delete_user_settings(
     ctx: Arc<AppContext>,
     headers: warp::http::HeaderMap,
+    query: HashMap<String, String>,
     rc: RequestContext,
 ) -> Result<warp::reply::Response, warp::Rejection> {
-    let token = extract_user_token(&headers)
+    let token = extract_token(&headers, &query)
         .ok_or_else(|| HDMealError::unauthorized("토큰이 없습니다."))?;
     let claims = validate_user_token(ValidateUserTokenInput {
         token: &token,
@@ -327,3 +299,92 @@ async fn handle_cache_healthcheck(
 
 use crate::shared::observability::RequestContext;
 use crate::transport::http::dto::api::CacheHealthStatus as CacheHealthcheckStatus;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+    use warp::http::HeaderMap;
+    use warp::http::HeaderValue;
+
+    fn headers_with(pairs: &[(&str, &str)]) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        for (k, v) in pairs {
+            h.insert(
+                warp::http::HeaderName::from_bytes(k.as_bytes()).unwrap(),
+                HeaderValue::from_str(v).unwrap(),
+            );
+        }
+        h
+    }
+
+    fn empty_query() -> HashMap<String, String> {
+        HashMap::new()
+    }
+
+    #[test]
+    fn extract_token_prefers_x_hdmeal_token_header() {
+        let h = headers_with(&[("X-HDMeal-Token", "alpha")]);
+        let q = empty_query();
+        assert_eq!(extract_token(&h, &q), Some("alpha".to_string()));
+    }
+
+    #[test]
+    fn extract_token_falls_back_to_bearer_header() {
+        let h = headers_with(&[("authorization", "Bearer beta")]);
+        let q = empty_query();
+        assert_eq!(extract_token(&h, &q), Some("beta".to_string()));
+    }
+
+    #[test]
+    fn extract_token_falls_back_to_query() {
+        let h = headers_with(&[]);
+        let mut q = empty_query();
+        q.insert("token".to_string(), "gamma".to_string());
+        assert_eq!(extract_token(&h, &q), Some("gamma".to_string()));
+    }
+
+    #[test]
+    fn extract_token_priority_header_over_query() {
+        let h = headers_with(&[("X-HDMeal-Token", "alpha")]);
+        let mut q = empty_query();
+        q.insert("token".to_string(), "gamma".to_string());
+        assert_eq!(extract_token(&h, &q), Some("alpha".to_string()));
+    }
+
+    #[test]
+    fn extract_token_priority_bearer_over_query() {
+        let h = headers_with(&[("authorization", "Bearer beta")]);
+        let mut q = empty_query();
+        q.insert("token".to_string(), "gamma".to_string());
+        assert_eq!(extract_token(&h, &q), Some("beta".to_string()));
+    }
+
+    #[test]
+    fn extract_token_trims_whitespace() {
+        let h = headers_with(&[("X-HDMeal-Token", "  alpha  ")]);
+        let q = empty_query();
+        assert_eq!(extract_token(&h, &q), Some("alpha".to_string()));
+    }
+
+    #[test]
+    fn extract_token_rejects_empty() {
+        let h = headers_with(&[("X-HDMeal-Token", "   ")]);
+        let q = empty_query();
+        assert_eq!(extract_token(&h, &q), None);
+    }
+
+    #[test]
+    fn extract_token_rejects_bearer_without_prefix() {
+        let h = headers_with(&[("authorization", "Basic dXNlcjpwYXNz")]);
+        let q = empty_query();
+        assert_eq!(extract_token(&h, &q), None);
+    }
+
+    #[test]
+    fn extract_token_returns_none_when_all_empty() {
+        let h = headers_with(&[]);
+        let q = empty_query();
+        assert_eq!(extract_token(&h, &q), None);
+    }
+}
