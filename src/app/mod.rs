@@ -55,7 +55,7 @@ pub async fn run() -> anyhow::Result<()> {
     ));
 
     // 시작 시: today-1 ~ today+10 미리 sync.
-    // 배치 upsert 로 N×1 round-trip → 3 round-trip 으로 축소.
+    // 배치 upsert 를 컬렉션별로 병렬 실행해 warmup latency 최소화.
     {
         let neis = neis.clone();
         let data = data.clone();
@@ -67,17 +67,22 @@ pub async fn run() -> anyhow::Result<()> {
                     let n_meals = fetched.meals.len();
                     let n_schedules = fetched.schedules.len();
                     let n_timetables = fetched.timetables.len();
-                    if let Err(e) = data.upsert_meals_batch(&fetched.meals).await {
+                    let (meals_res, schedules_res, timetables_res) = tokio::join!(
+                        data.upsert_meals_batch(&fetched.meals),
+                        data.upsert_schedules_batch(&fetched.schedules),
+                        data.upsert_timetables_batch(&fetched.timetables),
+                    );
+                    if let Err(e) = meals_res {
                         tracing::warn!(error = %e, count = n_meals, "warmup: meals bulk upsert failed");
                     } else {
                         tracing::debug!(count = n_meals, "warmup: meals bulk upsert ok");
                     }
-                    if let Err(e) = data.upsert_schedules_batch(&fetched.schedules).await {
+                    if let Err(e) = schedules_res {
                         tracing::warn!(error = %e, count = n_schedules, "warmup: schedules bulk upsert failed");
                     } else {
                         tracing::debug!(count = n_schedules, "warmup: schedules bulk upsert ok");
                     }
-                    if let Err(e) = data.upsert_timetables_batch(&fetched.timetables).await {
+                    if let Err(e) = timetables_res {
                         tracing::warn!(error = %e, count = n_timetables, "warmup: timetables bulk upsert failed");
                     } else {
                         tracing::debug!(count = n_timetables, "warmup: timetables bulk upsert ok");
@@ -116,7 +121,6 @@ pub async fn run() -> anyhow::Result<()> {
     tracing::info!(%addr, "HTTP server listening");
 
     let server_fut = warp::serve(router).run(addr);
-    let server_handle = server_fut;
     let shutdown = async {
         if let Err(e) = signal::ctrl_c().await {
             tracing::error!(error = %e, "ctrl_c failed");
@@ -124,7 +128,7 @@ pub async fn run() -> anyhow::Result<()> {
         tracing::info!("shutdown signal received");
     };
     tokio::select! {
-        _ = server_handle => {},
+        _ = server_fut => {},
         _ = shutdown => {
             periodic.stop().await;
             // MongoDB client 의 background cleanup 은 Arc 들이 drop 될 때
