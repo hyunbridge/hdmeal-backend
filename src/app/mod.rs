@@ -21,8 +21,9 @@ pub async fn run() -> anyhow::Result<()> {
     let config = AppConfig::from_env()?;
     observability::init(&config.app_name, config.otel_endpoint.as_deref())?;
 
-    // Repository (MongoDB)
-    let data = Arc::new(DataService::new(&config).await?);
+    // Repository (MongoDB) — 전역 가변 static 대신 Arc 로 명시적 수명 관리
+    let mongo_client = crate::repository::init_client(&config).await?;
+    let data = Arc::new(DataService::new(mongo_client.clone(), &config).await?);
     tracing::info!(db = %config.mongodb_database, "MongoDB connected");
 
     // Infrastructure
@@ -101,7 +102,12 @@ pub async fn run() -> anyhow::Result<()> {
         _ = server_handle => {},
         _ = shutdown => {
             periodic.stop().await;
-            crate::repository::close().await;
+            // MongoDB client 의 background cleanup 은 Arc 들이 drop 될 때
+            // `Client::Drop` 에서 처리됨 (mongodb 공식 권장). `Client::shutdown`
+            // 은 `self` 를 요구하므로 Arc<Client> 에서는 호출할 수 없음.
+            // ctx 와 data 가 scope 끝에서 drop 되며 driver 가 background
+            // task 를 정리함.
+            drop(mongo_client);
             observability::shutdown();
         }
     }

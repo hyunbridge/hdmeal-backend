@@ -15,30 +15,29 @@ use parking_lot::Mutex;
 
 use crate::config::AppConfig;
 use crate::domain::{
-    MealDocument, ScheduleDocument, ScheduleEntry, TimetableDocument, UserDocument,
-    UserPreferences, WaterTemperatureDocument, WeatherDocument,
+    MealDocument, ScheduleDocument, TimetableDocument, UserDocument, WaterTemperatureDocument,
+    WeatherDocument,
 };
 use crate::error::HDMealResult;
 
-use super::{get_collections, Collections};
-
-/// 인덱스 생성은 한 번만 수행하도록 보장.
-static INDEXES_READY: Mutex<bool> = Mutex::new(false);
+use super::{get_collections, Client, Collections};
 
 /// 모든 컬렉션에 대한 CRUD + 인덱스 관리.
 #[derive(Clone)]
 pub struct DataService {
     pub coll: Collections,
     empty_timetable: Arc<BTreeMap<String, BTreeMap<String, Vec<String>>>>,
+    indexes_ready: Arc<Mutex<bool>>,
 }
 
 impl DataService {
-    pub async fn new(config: &AppConfig) -> HDMealResult<Self> {
-        let coll = get_collections(config).await?;
+    pub async fn new(client: Arc<Client>, config: &AppConfig) -> HDMealResult<Self> {
+        let coll = get_collections(&client, &config.mongodb_database);
         let empty_timetable = build_empty_timetable(config.num_of_grades, config.num_of_classes);
         let svc = Self {
             coll,
             empty_timetable: Arc::new(empty_timetable),
+            indexes_ready: Arc::new(Mutex::new(false)),
         };
         svc.ensure_indexes().await?;
         Ok(svc)
@@ -47,7 +46,7 @@ impl DataService {
     /// 모든 컬렉션에 unique 인덱스 생성. 멱등.
     pub async fn ensure_indexes(&self) -> HDMealResult<()> {
         {
-            let ready = INDEXES_READY.lock();
+            let ready = self.indexes_ready.lock();
             if *ready {
                 return Ok(());
             }
@@ -79,7 +78,7 @@ impl DataService {
             .await?;
         self.coll.users.create_index(idx_user).await?;
 
-        let mut ready = INDEXES_READY.lock();
+        let mut ready = self.indexes_ready.lock();
         *ready = true;
         Ok(())
     }
