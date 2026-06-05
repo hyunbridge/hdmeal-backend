@@ -9,7 +9,7 @@ use crate::application::chatbot::types::{
 use crate::application::chatbot::Service;
 use crate::domain::{MealDocument, ScheduleDocument, TimetableDocument, UserPreferences};
 use crate::error::HDMealResult;
-use crate::shared::timezone::{today_kst_date, KST};
+use crate::shared::timezone::{format_weekday_ko, today_kst_date, KST};
 
 use super::weather_user::weather_briefing_text;
 
@@ -50,7 +50,7 @@ pub async fn handle_briefing(
         "{}은 {}({}) 입니다.",
         date_label,
         target_date.format("%Y-%m-%d"),
-        weekday_ko(target_date)
+        format_weekday_ko(target_date)
     );
     let schedule_text = briefing_schedule_text(date_label, schedule.as_ref());
     msgs.push(Message::Text(format!("{header}\n\n{schedule_text}")));
@@ -183,18 +183,6 @@ pub async fn handle_timetable(
     Ok(vec![Message::Text(timetable_text)])
 }
 
-fn weekday_ko(date: NaiveDate) -> &'static str {
-    match date.weekday() {
-        Weekday::Mon => "월",
-        Weekday::Tue => "화",
-        Weekday::Wed => "수",
-        Weekday::Thu => "목",
-        Weekday::Fri => "금",
-        Weekday::Sat => "토",
-        Weekday::Sun => "일",
-    }
-}
-
 fn briefing_schedule_text(date_label: &str, schedule: Option<&ScheduleDocument>) -> String {
     let summary = schedule
         .and_then(|s| s.summary.as_ref())
@@ -290,7 +278,7 @@ fn build_timetable_text(
         grade,
         class_no,
         date.format("%Y-%m-%d"),
-        weekday_ko(date)
+        format_weekday_ko(date)
     );
     for (idx, subject) in lessons.iter().enumerate() {
         text.push_str(&format!("\n{}교시: {}", idx + 1, subject));

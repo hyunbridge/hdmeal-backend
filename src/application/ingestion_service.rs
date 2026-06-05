@@ -67,7 +67,7 @@ impl IngestionService {
         let now = Instant::now();
         let mut map = self.cooldown.lock().unwrap();
         if let Some(last) = map.get(key) {
-            if now.duration_since(*last) < RANGE_COOLDOWN {
+            if now.saturating_duration_since(*last) < RANGE_COOLDOWN {
                 return true;
             }
         }
@@ -228,7 +228,7 @@ impl IngestionService {
 }
 
 fn prune_locked(now: Instant, map: &mut HashMap<String, Instant>) {
-    map.retain(|_, t| now.duration_since(*t) < RECENT_SYNC_TTL);
+    map.retain(|_, t| now.saturating_duration_since(*t) < RECENT_SYNC_TTL);
 }
 
 pub const SYNC_TIMEOUT_RANGE_DURATION: Duration = SYNC_TIMEOUT_RANGE;

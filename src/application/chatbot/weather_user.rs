@@ -1,7 +1,5 @@
 //! Weather, WaterTemperature, UserSettings, ModifyUserInfo intent 핸들러.
 
-use chrono::{Duration, Utc};
-
 use crate::application::chatbot::sync_helpers::{ensure_water_temperature, hour_label_from_ts};
 use crate::application::chatbot::types::{CardButton, CardMessage, KakaoSkillRequest, Message};
 use crate::application::chatbot::Service;
@@ -9,7 +7,7 @@ use crate::domain::WeatherDocument;
 use crate::error::HDMealResult;
 use crate::shared::context::new_request_id;
 use crate::shared::security::{issue_user_token, scope, IssueUserTokenInput};
-use crate::shared::timezone::{format_date_label, today_kst_date, KST};
+use crate::shared::timezone::{format_date_label, KST};
 
 /// KMA 응답을 briefing 텍스트로.
 pub fn weather_briefing_text(date_label: &str, w: &WeatherDocument) -> String {
@@ -127,10 +125,4 @@ pub async fn handle_modify_user_info(
         )
         .await?;
     Ok(vec![Message::Text("저장되었습니다.".to_string())])
-}
-
-// Quiet unused-import warnings on Datelike/Duration/Utc in some build configs.
-#[allow(dead_code)]
-fn _use() {
-    let _ = (today_kst_date(), Utc::now(), Duration::hours(0));
 }
