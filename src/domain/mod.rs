@@ -2,35 +2,14 @@
 //!
 //! 컬렉션 6 종 (meals, schedules, timetables, weather, water_temperatures, users)
 //! 과 그 내부 타입들. BSON 직렬화는
-//! 로컬 헬퍼 [`chrono_datetime_as_bson_datetime`] 로 `chrono::DateTime<Utc>` 를
-//! BSON `DateTime` 으로 저장합니다. HTTP 응답 DTO 는
-//! [`crate::transport::http::dto`] 에 별도로 둡니다.
+//! `bson::serde_helpers::datetime::FromChrono04DateTime` 로
+//! `chrono::DateTime<Utc>` 를 BSON `DateTime` 으로 저장합니다.
+//! HTTP 응답 DTO 는 [`crate::transport::http::dto`] 에 별도로 둡니다.
 
 use std::collections::BTreeMap;
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-
-mod chrono_datetime_as_bson_datetime {
-    use bson::DateTime as BsonDateTime;
-    use chrono::{DateTime, Utc};
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    pub fn serialize<S>(value: &DateTime<Utc>, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        BsonDateTime::from_chrono(*value).serialize(serializer)
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<DateTime<Utc>, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let value = BsonDateTime::deserialize(deserializer)?;
-        Ok(value.to_chrono())
-    }
-}
 
 /// `meals` 컬렉션.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -51,7 +30,7 @@ pub struct MealDocument {
 
     pub source_hash: Option<String>,
 
-    #[serde(with = "chrono_datetime_as_bson_datetime")]
+    #[serde(with = "bson::serde_helpers::datetime::FromChrono04DateTime")]
     pub created_at: DateTime<Utc>,
 }
 
@@ -74,7 +53,7 @@ pub struct ScheduleDocument {
 
     pub summary: Option<String>,
 
-    #[serde(with = "chrono_datetime_as_bson_datetime")]
+    #[serde(with = "bson::serde_helpers::datetime::FromChrono04DateTime")]
     pub created_at: DateTime<Utc>,
 }
 
@@ -100,7 +79,7 @@ pub struct TimetableDocument {
     #[serde(default)]
     pub lessons: BTreeMap<String, BTreeMap<String, Vec<String>>>,
 
-    #[serde(with = "chrono_datetime_as_bson_datetime")]
+    #[serde(with = "bson::serde_helpers::datetime::FromChrono04DateTime")]
     pub created_at: DateTime<Utc>,
 }
 
@@ -110,7 +89,7 @@ pub struct WeatherDocument {
     #[serde(rename = "_id", default, skip_serializing_if = "String::is_empty")]
     pub id: String,
 
-    #[serde(with = "chrono_datetime_as_bson_datetime")]
+    #[serde(with = "bson::serde_helpers::datetime::FromChrono04DateTime")]
     pub timestamp: DateTime<Utc>,
 
     pub temp: String,
@@ -122,7 +101,7 @@ pub struct WeatherDocument {
     pub humidity: String,
     pub first_hour: String,
 
-    #[serde(with = "chrono_datetime_as_bson_datetime")]
+    #[serde(with = "bson::serde_helpers::datetime::FromChrono04DateTime")]
     pub created_at: DateTime<Utc>,
 }
 
@@ -132,12 +111,12 @@ pub struct WaterTemperatureDocument {
     #[serde(rename = "_id", default, skip_serializing_if = "String::is_empty")]
     pub id: String,
 
-    #[serde(with = "chrono_datetime_as_bson_datetime")]
+    #[serde(with = "bson::serde_helpers::datetime::FromChrono04DateTime")]
     pub timestamp: DateTime<Utc>,
 
     pub temperature_c: f64,
 
-    #[serde(with = "chrono_datetime_as_bson_datetime")]
+    #[serde(with = "bson::serde_helpers::datetime::FromChrono04DateTime")]
     pub created_at: DateTime<Utc>,
 }
 
@@ -156,10 +135,10 @@ pub struct UserDocument {
     #[serde(default)]
     pub preferences: UserPreferences,
 
-    #[serde(with = "chrono_datetime_as_bson_datetime")]
+    #[serde(with = "bson::serde_helpers::datetime::FromChrono04DateTime")]
     pub created_at: DateTime<Utc>,
 
-    #[serde(with = "chrono_datetime_as_bson_datetime")]
+    #[serde(with = "bson::serde_helpers::datetime::FromChrono04DateTime")]
     pub updated_at: DateTime<Utc>,
 }
 
