@@ -7,6 +7,7 @@
 
 use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike, Utc};
 use serde::Deserialize;
+use url::Url;
 
 use super::http_client::HttpClient;
 use crate::config::AppConfig;
@@ -323,11 +324,8 @@ impl SeoulWaterClient {
 
     /// 한강 수온. HTTPS 먼저 (재시도 없음), 실패 시 HTTP.
     pub async fn fetch(&self) -> HDMealResult<SeoulWaterReading> {
-        let encoded =
-            percent_encoding::utf8_percent_encode(&self.token, percent_encoding::NON_ALPHANUMERIC)
-                .to_owned();
-        let https_url = format!("{SEOUL_HTTPS_URL_TMPL}/{encoded}/json/WPOSInformationTime/1/5/");
-        let http_url = format!("{SEOUL_HTTP_URL_TMPL}/{encoded}/json/WPOSInformationTime/1/5/");
+        let https_url = seoul_water_url(SEOUL_HTTPS_URL_TMPL, &self.token)?;
+        let http_url = seoul_water_url(SEOUL_HTTP_URL_TMPL, &self.token)?;
 
         let primary = self
             .http
@@ -395,6 +393,14 @@ impl SeoulWaterClient {
             temperature_c: avg,
         })
     }
+}
+
+fn seoul_water_url(base: &str, token: &str) -> HDMealResult<String> {
+    let mut url = Url::parse(base)?;
+    url.path_segments_mut()
+        .map_err(|_| HDMealError::internal("Seoul water: invalid base URL"))?
+        .extend([token, "json", "WPOSInformationTime", "1", "5", ""]);
+    Ok(url.into())
 }
 
 #[derive(Debug, Clone)]

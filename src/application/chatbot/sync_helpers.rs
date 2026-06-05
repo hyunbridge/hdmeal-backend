@@ -13,6 +13,8 @@ use crate::application::chatbot::Service;
 use crate::domain::{
     MealDocument, ScheduleDocument, TimetableDocument, WaterTemperatureDocument, WeatherDocument,
 };
+use crate::infrastructure::neis::auxiliary::WeatherView;
+use crate::repository::WeatherUpsert;
 
 use super::super::ingestion_service::is_fresh;
 
@@ -28,17 +30,8 @@ pub async fn ensure_weather(svc: &Service, ttl: Duration) -> Option<WeatherDocum
     let res = tokio::time::timeout(Duration::from_secs(2), async move {
         match kma.fetch_weather().await {
             Ok(view) => {
-                let payload = crate::repository::WeatherUpsert {
-                    temp: view.temp.clone(),
-                    temp_min: view.temp_min.clone(),
-                    temp_max: view.temp_max.clone(),
-                    sky: view.sky.clone(),
-                    pty: view.pty.clone(),
-                    precip_probability: view.precip_probability.clone(),
-                    humidity: view.humidity.clone(),
-                    first_hour: view.first_hour.clone(),
-                };
-                data.upsert_weather_at(view.timestamp, payload).await.ok()
+                let (timestamp, payload) = weather_upsert_from_view(view);
+                data.upsert_weather_at(timestamp, payload).await.ok()
             }
             Err(e) => {
                 tracing::warn!(error = %e, "kma fetch_weather failed");
@@ -58,20 +51,8 @@ pub async fn ensure_weather(svc: &Service, ttl: Duration) -> Option<WeatherDocum
     tokio::spawn(async move {
         let _ = tokio::time::timeout(Duration::from_secs(5 * 60), async move {
             let view = svc_clone.kma.fetch_weather().await.ok()?;
-            let payload = crate::repository::WeatherUpsert {
-                temp: view.temp.clone(),
-                temp_min: view.temp_min.clone(),
-                temp_max: view.temp_max.clone(),
-                sky: view.sky.clone(),
-                pty: view.pty.clone(),
-                precip_probability: view.precip_probability.clone(),
-                humidity: view.humidity.clone(),
-                first_hour: view.first_hour.clone(),
-            };
-            let _ = svc_clone
-                .data
-                .upsert_weather_at(view.timestamp, payload)
-                .await;
+            let (timestamp, payload) = weather_upsert_from_view(view);
+            let _ = svc_clone.data.upsert_weather_at(timestamp, payload).await;
             Some(())
         })
         .await;
@@ -185,4 +166,31 @@ pub fn hour_label_from_ts(ts: DateTime<Utc>) -> Cow<'static, str> {
     use chrono::Timelike;
     let kst = ts.with_timezone(&crate::shared::timezone::KST);
     crate::shared::timezone::format_hour(kst.hour())
+}
+
+fn weather_upsert_from_view(view: WeatherView) -> (DateTime<Utc>, WeatherUpsert) {
+    let WeatherView {
+        timestamp,
+        temp,
+        temp_min,
+        temp_max,
+        sky,
+        pty,
+        precip_probability,
+        humidity,
+        first_hour,
+    } = view;
+    (
+        timestamp,
+        WeatherUpsert {
+            temp,
+            temp_min,
+            temp_max,
+            sky,
+            pty,
+            precip_probability,
+            humidity,
+            first_hour,
+        },
+    )
 }
