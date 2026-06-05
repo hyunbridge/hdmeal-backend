@@ -176,7 +176,7 @@ mod tests {
             required_scope: scope::MANAGE_USER_INFO,
         })
         .unwrap_err();
-        assert_eq!(err.status(), warp::http::StatusCode::FORBIDDEN);
+        assert_eq!(err.status(), axum::http::StatusCode::FORBIDDEN);
     }
 
     #[test]
@@ -196,7 +196,7 @@ mod tests {
             required_scope: scope::GET_USER_INFO,
         })
         .unwrap_err();
-        assert_eq!(err.status(), warp::http::StatusCode::FORBIDDEN);
+        assert_eq!(err.status(), axum::http::StatusCode::FORBIDDEN);
     }
 
     #[test]

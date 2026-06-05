@@ -14,7 +14,7 @@
 ## 기술 스택
 
 - Rust 1.75+ (Edition 2021)
-- Warp 0.4 + Tokio (multi-thread runtime)
+- Axum 0.8 + Tokio (multi-thread runtime)
 - MongoDB 공식 드라이버 3.x (async, `rustls-tls`)
 - Serde / BSON / Chrono
 - `jsonwebtoken` 9 (HS256, RustCrypto — `aws-lc-rs` 미사용)
@@ -43,8 +43,8 @@ hdmeal-backend/
 │   │   └── neis/               # NEIS / KMA / Seoul Open Data
 │   ├── scheduler/              # 3h 주기 periodic task
 │   ├── shared/                 # base58, JWT, UUIDv7, KST, observability
-│   ├── transport/http/         # Warp 라우터 + DTO
-│   └── error.rs                # HDMealError + Warp reject 변환
+│   ├── transport/http/         # Axum Router + handler
+│   └── error.rs                # HDMealError + Axum IntoResponse 변환
 └── tests/                      # 통합/단위 테스트
 ```
 
@@ -191,7 +191,7 @@ cargo run --release
 - **Sampler**: `AlwaysOn`
 - **Resource attributes**: `service.name`, `service.version`
 - **Propagator**: W3C `TraceContext` (`traceparent` / `tracestate`) + `BaggagePropagator`
-- **Span source**: `tracing` 매크로 (`info!`, `warn!`, `error!`) 와 `warp::trace::request()` 및 custom Warp 필터
+- **Span source**: `tracing` 매크로 (`info!`, `warn!`, `error!`) 와 `tower_http::trace::TraceLayer`/custom middleware
   가 자동 계측. `#[instrument]` 매크로를 함수에 붙여 span 을 더 세분화 가능.
 
 ### 의도적 제외

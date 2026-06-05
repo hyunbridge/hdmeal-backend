@@ -111,6 +111,7 @@ fn normalize_path(path: &str) -> String {
     match path {
         "/healthz" | "/livez" | "/readyz" | "/metrics" | "/skill" | "/user/settings"
         | "/cache/healthcheck" | "/api/app/days" | "/api/app/meta" => path.to_owned(),
+        "/api/app/days/:day" => "/api/app/days/{day}".to_owned(),
         _ => {
             if let Some(day) = path.strip_prefix("/api/app/days/") {
                 if !day.is_empty() && !day.contains('/') {

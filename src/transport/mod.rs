@@ -1,3 +1,3 @@
-//! HTTP transport (Warp).
+//! HTTP transport (Axum).
 
 pub mod http;

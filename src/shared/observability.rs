@@ -2,10 +2,9 @@
 //!
 //! - [`init`] 가 `tracing-subscriber` 와 OTLP exporter 를 함께 부트스트랩.
 //!   `OTEL_EXPORTER_OTLP_ENDPOINT` 가 비어있으면 OTel 은 비활성.
-//! - [`request_context_filter`] Warp 필터: 들어오는 헤더에서 request ID 와
-//!   traceparent 를 추출/생성하고, [`RequestContext`] 를 다음 핸들러로 전달.
-//! - [`attach_response_headers`] 응답 헤더에 X-Request-ID, traceparent 등을
-//!   채워넣는 helper.
+//! - [`RequestContext`] 는 `FromRequestParts` 를 구현해 핸들러가 extractor 로
+//!   받을 수 있음. 들어오는 헤더에서 request ID 와 `traceparent` 를 추출/생성.
+//! - 응답 헤더 부착은 `transport::http` 의 middleware 가 담당 (header layer).
 
 use opentelemetry::global;
 use opentelemetry::trace::TracerProvider as _;
@@ -64,7 +63,6 @@ pub fn init(app_name: &str, otel_endpoint: Option<&str>) -> anyhow::Result<()> {
         let _ = TRACE_PROVIDER.set(provider.clone());
         let tracer = provider.tracer(app_name.to_string());
         global::set_tracer_provider(provider);
-        // W3C TraceContext propagator (traceparent / tracestate) only.
         global::set_text_map_propagator(TraceContextPropagator::new());
 
         let otel_layer = tracing_opentelemetry::layer().with_tracer(tracer);
@@ -92,26 +90,26 @@ pub fn shutdown() {
 }
 
 /// 들어오는 헤더에서 parent OTel context 추출.
-pub fn extract_parent_context(headers: &warp::http::HeaderMap) -> opentelemetry::Context {
+pub fn extract_parent_context(headers: &axum::http::HeaderMap) -> opentelemetry::Context {
     global::get_text_map_propagator(|prop| prop.extract(&HeaderExtractor(headers)))
 }
 
 /// 현재 span context 를 헤더에 inject (traceparent / tracestate).
-pub fn inject_response_headers(headers: &mut warp::http::HeaderMap, cx: &opentelemetry::Context) {
+pub fn inject_response_headers(headers: &mut axum::http::HeaderMap, cx: &opentelemetry::Context) {
     global::get_text_map_propagator(|prop| {
         prop.inject_context(cx, &mut HeaderMutInjector(headers))
     });
 }
 
 /// `X-Request-ID` 와 `X-HDMeal-Req-ID` 헤더에 같은 값 주입.
-pub fn write_request_id_headers(headers: &mut warp::http::HeaderMap, request_id: &str) {
-    if let Ok(v) = warp::http::HeaderValue::from_str(request_id) {
+pub fn write_request_id_headers(headers: &mut axum::http::HeaderMap, request_id: &str) {
+    if let Ok(v) = axum::http::HeaderValue::from_str(request_id) {
         headers.insert("X-Request-ID", v.clone());
         headers.insert("X-HDMeal-Req-ID", v);
     }
 }
 
-struct HeaderExtractor<'a>(&'a warp::http::HeaderMap);
+struct HeaderExtractor<'a>(&'a axum::http::HeaderMap);
 impl<'a> opentelemetry::propagation::Extractor for HeaderExtractor<'a> {
     fn get(&self, key: &str) -> Option<&str> {
         self.0.get(key).and_then(|v| v.to_str().ok())
@@ -121,36 +119,44 @@ impl<'a> opentelemetry::propagation::Extractor for HeaderExtractor<'a> {
     }
 }
 
-struct HeaderMutInjector<'a>(&'a mut warp::http::HeaderMap);
+struct HeaderMutInjector<'a>(&'a mut axum::http::HeaderMap);
 impl<'a> opentelemetry::propagation::Injector for HeaderMutInjector<'a> {
     fn set(&mut self, key: &str, value: String) {
         if let (Ok(name), Ok(v)) = (
-            key.parse::<warp::http::HeaderName>(),
-            warp::http::HeaderValue::from_str(&value),
+            key.parse::<axum::http::HeaderName>(),
+            axum::http::HeaderValue::from_str(&value),
         ) {
             self.0.insert(name, v);
         }
     }
 }
 
-/// Warp 필터: 요청 헤더에서 `X-Request-ID` / `X-HDMeal-Req-ID` / `X-HDMeal-ReqId`
-/// 와 `traceparent` 를 추출해 [`RequestContext`] 를 만든다.
-pub fn request_context_filter(
-) -> impl warp::Filter<Extract = (RequestContext,), Error = std::convert::Infallible> + Clone {
-    use warp::Filter as _;
-    warp::header::headers_cloned().and_then(|headers: warp::http::HeaderMap| async move {
-        let raw = headers
-            .get("X-Request-ID")
-            .or_else(|| headers.get("X-HDMeal-Req-ID"))
-            .or_else(|| headers.get("X-HDMeal-ReqId"))
-            .and_then(|v| v.to_str().ok())
-            .and_then(normalize_request_id)
-            .unwrap_or_else(new_request_id);
+/// axum extractor: 핸들러 시그니처에서 `rc: RequestContext` 로 받는다.
+impl<S> axum::extract::FromRequestParts<S> for RequestContext
+where
+    S: Send + Sync,
+{
+    type Rejection = std::convert::Infallible;
 
-        let parent_cx = extract_parent_context(&headers);
-        Ok::<_, std::convert::Infallible>(RequestContext {
-            request_id: raw,
-            parent_cx,
-        })
-    })
+    fn from_request_parts(
+        parts: &mut axum::http::request::Parts,
+        _state: &S,
+    ) -> impl std::future::Future<Output = Result<Self, Self::Rejection>> + Send {
+        let headers = parts.headers.clone();
+        async move {
+            let raw = headers
+                .get("X-Request-ID")
+                .or_else(|| headers.get("X-HDMeal-Req-ID"))
+                .or_else(|| headers.get("X-HDMeal-ReqId"))
+                .and_then(|v| v.to_str().ok())
+                .and_then(normalize_request_id)
+                .unwrap_or_else(new_request_id);
+
+            let parent_cx = extract_parent_context(&headers);
+            Ok(RequestContext {
+                request_id: raw,
+                parent_cx,
+            })
+        }
+    }
 }

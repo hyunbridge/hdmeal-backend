@@ -1,59 +1,35 @@
 //! `/api/app/*` 핸들러.
 
-use std::sync::Arc;
+use axum::extract::{Path, Query, State};
+use axum::http::{HeaderValue, StatusCode};
+use axum::response::{IntoResponse, Response};
+use axum::routing::get;
+use axum::{Json, Router};
 
-use chrono::Duration as ChronoDuration;
-use warp::http::HeaderValue;
-use warp::http::StatusCode;
-use warp::reply::{json, with_status, Reply as _};
-use warp::Filter;
-
-use crate::application::AppContext;
 use crate::error::HDMealError;
-use crate::shared::observability::{request_context_filter, RequestContext};
+use crate::shared::observability::RequestContext;
 use crate::shared::timezone::today_kst_date;
 use crate::transport::http::dto::api::*;
+use crate::transport::http::RouterState;
 
 use super::dto::api::{parse_date_param, parse_optional_date_param};
 
-pub fn routes(
-    ctx: Arc<AppContext>,
-) -> impl Filter<Extract = (warp::reply::Response,), Error = warp::Rejection> + Clone {
-    let req_ctx = request_context_filter();
-    let ctx_for_days = ctx.clone();
-    let ctx_for_day = ctx.clone();
-    let ctx_for_meta = ctx.clone();
-
-    let days = warp::path!("api" / "app" / "days")
-        .and(warp::get())
-        .and(warp::query::<DaysQuery>())
-        .and(warp::any().map(move || ctx_for_days.clone()))
-        .and(req_ctx)
-        .and_then(|q, ctx, rc| async move { handle_days(ctx, rc, q).await });
-
-    let day = warp::path!("api" / "app" / "days" / String)
-        .and(warp::get())
-        .and(warp::any().map(move || ctx_for_day.clone()))
-        .and(request_context_filter())
-        .and_then(|d, ctx, rc| async move { handle_day(ctx, rc, d).await });
-
-    let meta = warp::path!("api" / "app" / "meta")
-        .and(warp::get())
-        .and(warp::any().map(move || ctx_for_meta.clone()))
-        .and(request_context_filter())
-        .and_then(|ctx, rc| async move { handle_meta(ctx, rc).await });
-
-    days.or(day).unify().or(meta).unify()
+pub fn router() -> Router<RouterState> {
+    Router::new()
+        .route("/api/app/days", get(days))
+        .route("/api/app/days/:day", get(day))
+        .route("/api/app/meta", get(meta))
 }
 
-async fn handle_days(
-    ctx: Arc<AppContext>,
+async fn days(
+    State(state): State<RouterState>,
     rc: RequestContext,
-    q: DaysQuery,
-) -> Result<warp::reply::Response, warp::Rejection> {
+    Query(q): Query<DaysQuery>,
+) -> Result<Response, HDMealError> {
+    let ctx = state.ctx;
     let today = today_kst_date();
-    let default_start = today - ChronoDuration::days(1);
-    let default_end = today + ChronoDuration::days(7);
+    let default_start = today - chrono::Duration::days(1);
+    let default_end = today + chrono::Duration::days(7);
 
     let start = parse_optional_date_param(q.from.as_deref())
         .map_err(HDMealError::bad_request)?
@@ -63,13 +39,13 @@ async fn handle_days(
         .unwrap_or(default_end);
 
     if start > end {
-        return Err(HDMealError::bad_request("시작일이 종료일보다 늦습니다.").into());
+        return Err(HDMealError::bad_request("시작일이 종료일보다 늦습니다."));
     }
     let max_days = ctx.config.max_days_range as i64;
     if (end - start).num_days() + 1 > max_days {
-        return Err(
-            HDMealError::bad_request(format!("최대 조회 기간은 {max_days}일입니다.")).into(),
-        );
+        return Err(HDMealError::bad_request(format!(
+            "최대 조회 기간은 {max_days}일입니다."
+        )));
     }
 
     let start_str = start.format("%Y-%m-%d").to_string();
@@ -133,18 +109,19 @@ async fn handle_days(
         },
         data,
     };
-    let mut resp = with_status(json(&body), StatusCode::OK).into_response();
+    let mut resp = (StatusCode::OK, Json(body)).into_response();
     if let Ok(v) = HeaderValue::from_str(&format!("{start_str}~{end_str}")) {
         resp.headers_mut().insert("X-HDMeal-Range", v);
     }
-    Ok(crate::transport::http::finalize_reply(&rc, resp))
+    Ok(resp)
 }
 
-async fn handle_day(
-    ctx: Arc<AppContext>,
+async fn day(
+    State(state): State<RouterState>,
     rc: RequestContext,
-    day: String,
-) -> Result<warp::reply::Response, warp::Rejection> {
+    Path(day): Path<String>,
+) -> Result<Response, HDMealError> {
+    let ctx = state.ctx;
     let d = parse_date_param(&day, "day").map_err(HDMealError::bad_request)?;
     let d_str = d.format("%Y-%m-%d").to_string();
     let _ = ctx.ingestion.try_sync_range_short(d, d).await;
@@ -174,17 +151,18 @@ async fn handle_day(
             timetable,
         },
     };
-    let mut resp = with_status(json(&body), StatusCode::OK).into_response();
+    let mut resp = (StatusCode::OK, Json(body)).into_response();
     if let Ok(v) = HeaderValue::from_str(&format!("{d_str}~{d_str}")) {
         resp.headers_mut().insert("X-HDMeal-Range", v);
     }
-    Ok(crate::transport::http::finalize_reply(&rc, resp))
+    Ok(resp)
 }
 
-async fn handle_meta(
-    ctx: Arc<AppContext>,
+async fn meta(
+    State(state): State<RouterState>,
     rc: RequestContext,
-) -> Result<warp::reply::Response, warp::Rejection> {
+) -> Result<Response, HDMealError> {
+    let ctx = state.ctx;
     let body = MetaResponse {
         request_id: rc.request_id.clone(),
         data: MetaData {
@@ -193,6 +171,6 @@ async fn handle_meta(
             debug: ctx.config.debug,
         },
     };
-    let resp = with_status(json(&body), StatusCode::OK).into_response();
-    Ok(crate::transport::http::finalize_reply(&rc, resp))
+    let resp = (StatusCode::OK, Json(body)).into_response();
+    Ok(resp)
 }

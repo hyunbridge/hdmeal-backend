@@ -3,7 +3,7 @@ name = "hdmeal-backend"
 version = "0.1.0"
 edition = "2021"
 rust-version = "1.88"
-description = "HDMeal backend (Rust + Warp) — NEIS 급식/시간표/일정, KMA 날씨, 한강 수온, 카카오 챗봇, MongoDB"
+description = "HDMeal backend (Rust + Axum) — NEIS 급식/시간표/일정, KMA 날씨, 한강 수온, 카카오 챗봇, MongoDB"
 license = "MIT"
 
 [lib]
@@ -15,8 +15,27 @@ name = "hdmeal-backend"
 path = "src/main.rs"
 
 [dependencies]
-# Warp: "test" feature (warp::test 등) 는 dev-deps 로 이동시켜 release 바이너리에서 제외.
-warp = { version = "0.4", default-features = false, features = ["server"] }
+# Axum: 미사용 feature (`form`, `tower-log` 등) 제외. `matched-path`/`original-uri` 는
+# `MatchedPath`/`OriginalUri` extractor (path 정규화 metrics + OTel span attribute) 용.
+axum = { version = "0.8", default-features = false, features = [
+    "http1",
+    "json",
+    "query",
+    "tokio",
+    "tracing",
+    "matched-path",
+    "original-uri",
+] }
+# tower: ServiceExt::oneshot (테스트) + util::BoxCloneService 등 최소 feature.
+tower = { version = "0.5", default-features = false, features = ["util"] }
+# tower-http: CorsLayer, RequestBodyLimitLayer, SetResponseHeaderLayer 만 활성화.
+# `default-features = false` 로 compression/trace(완전형) / fs 등 미사용 모듈 차단.
+tower-http = { version = "0.6", default-features = false, features = [
+    "cors",
+    "limit",
+    "set-header",
+    "util",
+] }
 # Tokio: "full" 대신 실제 사용 feature 만 (rt-multi-thread, net, time, sync, signal, macros, io-util).
 tokio = { version = "1", default-features = false, features = [
     "rt-multi-thread",
@@ -77,7 +96,6 @@ subtle = "2"
 # 테스트 / 벤치 / 예제 빌드 시에만 활성화되는 추가 feature.
 # release 빌드에는 포함되지 않으므로, 런타임 바이너리 크기에 영향 없음.
 [dev-dependencies]
-warp = { version = "0.4", features = ["server", "test"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "signal", "sync", "io-util", "test-util"] }
 
 [lints.rust]

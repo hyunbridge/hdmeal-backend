@@ -87,28 +87,27 @@ pub async fn run() -> anyhow::Result<()> {
         mongo_client.clone(),
     );
     let addr: SocketAddr = ([0, 0, 0, 0], config.port).into();
+    let listener = tokio::net::TcpListener::bind(addr).await?;
     tracing::info!(%addr, "HTTP server listening");
 
-    let server_fut = warp::serve(router).run(addr);
-    let shutdown = async {
-        if let Err(e) = signal::ctrl_c().await {
-            tracing::error!(error = %e, "ctrl_c failed");
-        }
-        tracing::info!("shutdown signal received");
-    };
-    tokio::select! {
-        _ = server_fut => {},
-        _ = shutdown => {
-            periodic.stop().await;
-            // MongoDB client 의 background cleanup 은 Arc 들이 drop 될 때
-            // `Client::Drop` 에서 처리됨 (mongodb 공식 권장). `Client::shutdown`
-            // 은 `self` 를 요구하므로 Arc<Client> 에서는 호출할 수 없음.
-            // ctx 와 data 가 scope 끝에서 drop 되며 driver 가 background
-            // task 를 정리함.
-            drop(mongo_client);
-            observability::shutdown();
-        }
-    }
+    axum::serve(listener, router.into_make_service())
+        .with_graceful_shutdown(async {
+            if let Err(e) = signal::ctrl_c().await {
+                tracing::error!(error = %e, "ctrl_c failed");
+            }
+            tracing::info!("shutdown signal received");
+        })
+        .await?;
+
+    // graceful shutdown 이후 cleanup
+    periodic.stop().await;
+    // MongoDB client 의 background cleanup 은 Arc 들이 drop 될 때
+    // `Client::Drop` 에서 처리됨 (mongodb 공식 권장). `Client::shutdown`
+    // 은 `self` 를 요구하므로 Arc<Client> 에서는 호출할 수 없음.
+    // ctx 와 data 가 scope 끝에서 drop 되며 driver 가 background
+    // task 를 정리함.
+    drop(mongo_client);
+    observability::shutdown();
 
     Ok(())
 }
