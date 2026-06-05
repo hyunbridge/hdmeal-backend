@@ -181,7 +181,7 @@ impl NeisClient {
             let summary = if summary_lines.is_empty() {
                 None
             } else {
-                Some(summary_lines.join("\n").replace("()", ""))
+                Some(summary_lines.join("\n"))
             };
             out.push(ScheduleDocument {
                 id: date.clone(),
@@ -211,9 +211,8 @@ impl NeisClient {
         let total_pages = total.div_ceil(TIMETABLE_PAGE_SIZE);
 
         // 2) 나머지 페이지를 병렬로.
-        let pages: Vec<u32> = (2..=total_pages).collect();
-        let mut handles = Vec::with_capacity(pages.len());
-        for p in pages {
+        let mut handles = Vec::with_capacity(total_pages.saturating_sub(1) as usize);
+        for p in 2..=total_pages {
             let mut p_params = self.common_params();
             p_params.push(("ALL_TI_YMD", date.format("%Y%m%d").to_string()));
             p_params.push(("pIndex", p.to_string()));
@@ -433,7 +432,10 @@ fn date_range(start: NaiveDate, end: NaiveDate) -> Vec<NaiveDate> {
     let mut d = start;
     while d <= end {
         out.push(d);
-        d = d.succ_opt().unwrap_or(d);
+        let Some(next) = d.succ_opt() else {
+            break;
+        };
+        d = next;
     }
     out
 }
@@ -453,77 +455,43 @@ fn parse_neis_ymd(s: &str) -> Option<String> {
 pub fn parse_ddish_nm(raw: &str) -> (Vec<MealMenuItem>, Vec<String>) {
     let mut menus = Vec::new();
     let mut plain = Vec::new();
-    for line in raw.split(['\n', '\r']) {
-        let line = line.replace("<br/>", "\n");
-        for inner in line.split('\n') {
-            let trimmed = inner.trim();
-            if trimmed.is_empty() {
-                continue;
-            }
-            // (1) 알레르기 번호 후보 추출 → 1..18 만 채택
-            let mut allergies: Vec<i32> = ALLERGY_RE
-                .captures_iter(trimmed)
-                .filter_map(|cap| cap.get(1).and_then(|m| m.as_str().parse::<i32>().ok()))
-                .filter(|n| (1..=18).contains(n))
-                .collect();
-            allergies.sort_unstable();
-            allergies.dedup();
-
-            let mut name = ALLERGY_RE.replace_all(trimmed, "").into_owned();
-            name = TRAILING_RE.replace(&name, "").into_owned();
-            name = name.replace("()", "");
-            let name = name.trim().to_owned();
-            if name.is_empty() {
-                continue;
-            }
-
-            let contains_delicious = DELICIOUS_VEC.iter().any(|kw| name.contains(*kw));
-            let final_name = if contains_delicious {
-                format!("⭐{name}")
-            } else {
-                name.clone()
-            };
-
-            menus.push(MealMenuItem {
-                name: final_name,
-                allergies,
-            });
-            plain.push(name);
+    let normalized = raw.replace("<br/>", "\n");
+    for inner in normalized.split(['\n', '\r']) {
+        let trimmed = inner.trim();
+        if trimmed.is_empty() {
+            continue;
         }
+        // (1) 알레르기 번호 후보 추출 → 1..18 만 채택
+        let mut allergies: Vec<i32> = ALLERGY_RE
+            .captures_iter(trimmed)
+            .filter_map(|cap| cap.get(1).and_then(|m| m.as_str().parse::<i32>().ok()))
+            .filter(|n| (1..=18).contains(n))
+            .collect();
+        allergies.sort_unstable();
+        allergies.dedup();
+
+        let mut name = ALLERGY_RE.replace_all(trimmed, "").into_owned();
+        name = TRAILING_RE.replace(&name, "").into_owned();
+        name = name.replace("()", "");
+        let name = name.trim().to_owned();
+        if name.is_empty() {
+            continue;
+        }
+
+        let contains_delicious = DELICIOUS_VEC.iter().any(|kw| name.contains(*kw));
+        let final_name = if contains_delicious {
+            format!("⭐{name}")
+        } else {
+            name.clone()
+        };
+
+        menus.push(MealMenuItem {
+            name: final_name,
+            allergies,
+        });
+        plain.push(name);
     }
     (menus, plain)
-}
-
-impl HttpClient {
-    /// 쿼리 파라미터를 URL 에 추가해 GET.
-    pub async fn get_json_with_params<T: serde::de::DeserializeOwned>(
-        &self,
-        url: &str,
-        params: &[(&str, String)],
-    ) -> HDMealResult<T> {
-        let mut url = url.to_string();
-        if !params.is_empty() {
-            url.push('?');
-            let mut first = true;
-            for (k, v) in params {
-                if !first {
-                    url.push('&');
-                }
-                first = false;
-                url.push_str(k);
-                url.push('=');
-                let encoded: String =
-                    percent_encoding::utf8_percent_encode(v, percent_encoding::NON_ALPHANUMERIC)
-                        .collect();
-                url.push_str(&encoded);
-            }
-        }
-        let resp = self
-            .get_with_retry(&url, reqwest::header::HeaderMap::new())
-            .await?;
-        let val = resp.json::<T>().await?;
-        Ok(val)
-    }
 }
 
 #[cfg(test)]

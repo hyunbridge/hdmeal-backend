@@ -10,7 +10,7 @@ use std::time::Duration;
 use rand_chacha::ChaCha8Rng;
 use rand_core::{RngCore, SeedableRng};
 use reqwest::header::{HeaderMap, RETRY_AFTER};
-use reqwest::{Client, Response, StatusCode};
+use reqwest::{Client, Response, StatusCode, Url};
 use tokio::time::sleep;
 
 use crate::error::{HDMealError, HDMealResult};
@@ -82,6 +82,20 @@ impl HttpClient {
         let resp = self.get_with_retry(url, HeaderMap::new()).await?;
         let value = resp.json::<T>().await?;
         Ok(value)
+    }
+
+    /// 쿼리 파라미터를 URL 에 추가해 GET.
+    pub async fn get_json_with_params<T: serde::de::DeserializeOwned>(
+        &self,
+        url: &str,
+        params: &[(&str, String)],
+    ) -> HDMealResult<T> {
+        let url = Url::parse_with_params(url, params.iter().map(|(k, v)| (*k, v.as_str())))?;
+        let resp = self
+            .get_with_retry(url.as_str(), reqwest::header::HeaderMap::new())
+            .await?;
+        let val = resp.json::<T>().await?;
+        Ok(val)
     }
 
     /// GET 요청을 재시도와 함께 보냅니다.
