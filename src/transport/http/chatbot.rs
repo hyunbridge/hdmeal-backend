@@ -50,25 +50,23 @@ pub fn router() -> Router<RouterState> {
 ///   2. `Authorization: Bearer <token>` 헤더
 ///   3. `?token=` 쿼리 (proxy 로그에 남으므로 최후 수단)
 fn extract_token(headers: &HeaderMap, query: &HashMap<String, String>) -> Option<String> {
-    let candidates = || -> [Option<&str>; 3] {
-        [
-            headers.get("X-HDMeal-Token").and_then(|v| v.to_str().ok()),
-            headers
-                .get("authorization")
-                .and_then(|v| v.to_str().ok())
-                .and_then(|s| {
-                    let mut parts = s.trim().splitn(2, char::is_whitespace);
-                    match (parts.next(), parts.next()) {
-                        (Some(scheme), Some(token)) if scheme.eq_ignore_ascii_case("bearer") => {
-                            Some(token)
-                        }
-                        _ => None,
+    let candidates: [Option<&str>; 3] = [
+        headers.get("X-HDMeal-Token").and_then(|v| v.to_str().ok()),
+        headers
+            .get("authorization")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| {
+                let mut parts = s.trim().splitn(2, char::is_whitespace);
+                match (parts.next(), parts.next()) {
+                    (Some(scheme), Some(token)) if scheme.eq_ignore_ascii_case("bearer") => {
+                        Some(token)
                     }
-                }),
-            query.get("token").map(String::as_str),
-        ]
-    };
-    candidates()
+                    _ => None,
+                }
+            }),
+        query.get("token").map(String::as_str),
+    ];
+    candidates
         .into_iter()
         .flatten()
         .map(str::trim)
