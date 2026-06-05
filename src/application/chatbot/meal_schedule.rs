@@ -2,7 +2,9 @@
 
 use chrono::{Datelike, NaiveDate, Weekday};
 
-use crate::application::chatbot::types::{parse_date, KakaoSkillRequest, Message, ALLERGY_LABELS};
+use crate::application::chatbot::types::{
+    format_menu_with_allergies, parse_date, KakaoSkillRequest, Message,
+};
 use crate::application::chatbot::Service;
 use crate::error::HDMealResult;
 use crate::shared::timezone::{format_date_label, today_kst_date};
@@ -73,47 +75,19 @@ pub async fn handle_meal(
     // AllergyInfo preference 조회
     let user = svc.users.ensure_user(platform, external_id).await?;
     let mode = if user.preferences.allergy_info.is_empty() {
-        "Number".to_string()
+        "Number"
     } else {
-        user.preferences.allergy_info
+        user.preferences.allergy_info.as_str()
     };
 
     let mut text = format!("{}:\n", format_date_label(date));
     let mut menus = Vec::new();
     for menu in &meal.menus {
-        let clean_name = menu.name.replace('⭐', "").trim().to_string();
-        let label = match mode.as_str() {
-            "None" => clean_name,
-            "FullText" => {
-                let names: Vec<String> = menu
-                    .allergies
-                    .iter()
-                    .filter_map(|&a| ALLERGY_LABELS.get(a as usize).copied())
-                    .map(String::from)
-                    .collect();
-                if names.is_empty() {
-                    clean_name
-                } else {
-                    format!("{}({})", clean_name, names.join(", "))
-                }
-            }
-            _ => {
-                if menu.allergies.is_empty() {
-                    clean_name
-                } else {
-                    format!(
-                        "{}({})",
-                        clean_name,
-                        menu.allergies
-                            .iter()
-                            .map(|a| a.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )
-                }
-            }
-        };
-        menus.push(label);
+        menus.push(format_menu_with_allergies(
+            &menu.name,
+            &menu.allergies,
+            mode,
+        ));
     }
     text.push_str(&menus.join("\n"));
     text.push_str(&format!("\n\n열량: {} kcal", meal.calories.unwrap_or(0.0)));
@@ -277,7 +251,10 @@ fn render_schedule_range(
                 group_end = Some(d);
             }
         }
-        d = d.succ_opt().unwrap_or(d);
+        let Some(next) = d.succ_opt() else {
+            break;
+        };
+        d = next;
     }
     if let (Some(gs), Some(ge), Some(cs)) = (group_start, group_end, current_summary) {
         out.push_str(&format_group_line(gs, ge, &cs));

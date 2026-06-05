@@ -4,7 +4,7 @@ use chrono::{Datelike, NaiveDate, Timelike, Weekday};
 
 use crate::application::chatbot::sync_helpers::preload_day_bundle;
 use crate::application::chatbot::types::{
-    parse_date, CardButton, CardMessage, KakaoSkillRequest, Message, ALLERGY_LABELS,
+    format_menu_with_allergies, parse_date, CardButton, CardMessage, KakaoSkillRequest, Message,
 };
 use crate::application::chatbot::Service;
 use crate::domain::{MealDocument, ScheduleDocument, TimetableDocument, UserPreferences};
@@ -232,30 +232,11 @@ fn briefing_meal_text(
 
     let mut lines = Vec::new();
     for menu in &meal.menus {
-        let clean_name = menu.name.replace('⭐', "").trim().to_string();
-        let formatted = if pref == "None" || menu.allergies.is_empty() {
-            clean_name
-        } else if pref == "FullText" {
-            let labels: Vec<String> = menu
-                .allergies
-                .iter()
-                .filter_map(|a| ALLERGY_LABELS.get(*a as usize).copied())
-                .map(|s| s.to_string())
-                .collect();
-            if labels.is_empty() {
-                clean_name
-            } else {
-                format!("{clean_name}({})", labels.join(", "))
-            }
-        } else {
-            let labels: Vec<String> = menu.allergies.iter().map(|a| a.to_string()).collect();
-            if labels.is_empty() {
-                clean_name
-            } else {
-                format!("{clean_name}({})", labels.join(", "))
-            }
-        };
-        lines.push(formatted);
+        lines.push(format_menu_with_allergies(
+            &menu.name,
+            &menu.allergies,
+            pref,
+        ));
     }
 
     let mut text = format!("{date_label} 급식:\n{}", lines.join("\n"));

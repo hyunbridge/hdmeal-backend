@@ -1,6 +1,7 @@
 //! 챗봇 메시지 / 카카오 요청·응답 타입.
 
 use std::collections::HashMap;
+use std::fmt::Write as _;
 
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
@@ -31,6 +32,43 @@ pub const ALLERGY_LABELS: &[&str] = &[
 
 pub fn parse_date(s: &str) -> Option<NaiveDate> {
     NaiveDate::parse_from_str(s, "%Y-%m-%d").ok()
+}
+
+pub fn format_menu_with_allergies(name: &str, allergies: &[i32], mode: &str) -> String {
+    let clean_name = name.trim_start_matches('⭐').trim();
+    match mode {
+        "None" => clean_name.to_owned(),
+        "FullText" => {
+            let labels: Vec<&str> = allergies
+                .iter()
+                .filter_map(|&a| ALLERGY_LABELS.get(a as usize).copied())
+                .collect();
+            if labels.is_empty() {
+                clean_name.to_owned()
+            } else {
+                format!("{clean_name}({})", labels.join(", "))
+            }
+        }
+        _ => format_menu_with_numbers(clean_name, allergies),
+    }
+}
+
+fn format_menu_with_numbers(name: &str, allergies: &[i32]) -> String {
+    if allergies.is_empty() {
+        return name.to_owned();
+    }
+
+    let mut out = String::with_capacity(name.len() + allergies.len() * 4 + 2);
+    out.push_str(name);
+    out.push('(');
+    for (idx, allergy) in allergies.iter().enumerate() {
+        if idx > 0 {
+            out.push_str(", ");
+        }
+        let _ = write!(out, "{allergy}");
+    }
+    out.push(')');
+    out
 }
 
 // ----------------- Kakao request -----------------
