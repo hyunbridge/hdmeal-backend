@@ -45,10 +45,11 @@ impl Metrics {
 
     /// HTTP 요청 1 건을 카운트.
     pub fn record_request(&self, path: &str, method: &str, status: u16) {
+        let path = normalize_path(path);
         let mut map = self.requests.lock().unwrap();
         let entry = map
             .entry(RequestKey {
-                path: path.to_owned(),
+                path,
                 method: method.to_owned(),
                 status,
             })
@@ -106,6 +107,21 @@ fn escape_label(s: &str) -> String {
     out
 }
 
+fn normalize_path(path: &str) -> String {
+    match path {
+        "/healthz" | "/livez" | "/readyz" | "/metrics" | "/skill" | "/user/settings"
+        | "/cache/healthcheck" | "/api/app/days" | "/api/app/meta" => path.to_owned(),
+        _ => {
+            if let Some(day) = path.strip_prefix("/api/app/days/") {
+                if !day.is_empty() && !day.contains('/') {
+                    return "/api/app/days/{day}".to_owned();
+                }
+            }
+            "/__unknown__".to_owned()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -126,6 +142,8 @@ mod tests {
         m.record_request("/healthz", "GET", 200);
         m.record_request("/healthz", "GET", 500);
         m.record_request("/api/app/days", "GET", 200);
+        m.record_request("/api/app/days/2024-06-05", "GET", 200);
+        m.record_request("/unlisted/path", "GET", 200);
 
         let r = m.render();
         assert!(
@@ -137,15 +155,38 @@ mod tests {
         assert!(r.contains(
             "http_requests_total{path=\"/api/app/days\",method=\"GET\",status=\"200\"} 1"
         ));
+        assert!(r.contains(
+            "http_requests_total{path=\"/api/app/days/{day}\",method=\"GET\",status=\"200\"} 1"
+        ));
+        assert!(r.contains(
+            "http_requests_total{path=\"/__unknown__\",method=\"GET\",status=\"200\"} 1"
+        ));
     }
 
     #[test]
     fn escapes_quotes_and_backslashes() {
         let m = Metrics::new();
-        m.record_request("/x\"y", "GET", 200);
-        m.record_request("/x\\y", "GET", 200);
+        m.record_request("/healthz", "G\"E\\T", 200);
+        m.record_request("/healthz", "G\\E\"T", 200);
         let r = m.render();
-        assert!(r.contains(r#"path="/x\"y""#));
-        assert!(r.contains(r#"path="/x\\y""#));
+        assert!(r.contains(r#"method="G\"E\\T""#));
+        assert!(r.contains(r#"method="G\\E\"T""#));
+        assert_eq!(escape_label(r#"x"y"#), r#"x\"y"#);
+        assert_eq!(escape_label(r#"x\y"#), r#"x\\y"#);
+    }
+
+    #[test]
+    fn normalizes_static_and_dynamic_paths() {
+        assert_eq!(normalize_path("/healthz"), "/healthz");
+        assert_eq!(normalize_path("/api/app/days"), "/api/app/days");
+        assert_eq!(
+            normalize_path("/api/app/days/2024-06-05"),
+            "/api/app/days/{day}"
+        );
+        assert_eq!(
+            normalize_path("/api/app/days/2024-06-05/extra"),
+            "/__unknown__"
+        );
+        assert_eq!(normalize_path("/some/other/path"), "/__unknown__");
     }
 }
