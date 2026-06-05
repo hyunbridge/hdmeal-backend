@@ -14,14 +14,14 @@ use chrono::Duration as ChronoDuration;
 #[test]
 fn error_envelope_shape() {
     let e = HDMealError::bad_request("잘바르지 않은 요청입니다.");
-    assert_eq!(e.status(), warp::http::StatusCode::BAD_REQUEST);
+    assert_eq!(e.status(), axum::http::StatusCode::BAD_REQUEST);
     assert_eq!(e.public_message(), "잘바르지 않은 요청입니다.");
 }
 
 #[test]
 fn error_unauthorized() {
     let e = HDMealError::unauthorized("토큰이 없습니다.");
-    assert_eq!(e.status(), warp::http::StatusCode::UNAUTHORIZED);
+    assert_eq!(e.status(), axum::http::StatusCode::UNAUTHORIZED);
     assert_eq!(e.public_message(), "토큰이 없습니다.");
 }
 
@@ -78,7 +78,7 @@ fn jwt_expired_is_rejected() {
         required_scope: scope::GET_USER_INFO,
     })
     .unwrap_err();
-    assert_eq!(err.status(), warp::http::StatusCode::FORBIDDEN);
+    assert_eq!(err.status(), axum::http::StatusCode::FORBIDDEN);
 }
 
 #[test]
