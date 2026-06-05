@@ -17,7 +17,7 @@ task_local! {
     pub static REQUEST_ID: String;
 }
 
-/// 새 UUIDv7 을 발급합니다. 실패 시 UUIDv4 로 fallback.
+/// 새 UUIDv7 을 발급합니다.
 pub fn new_request_id() -> String {
     Uuid::now_v7().to_string()
 }
