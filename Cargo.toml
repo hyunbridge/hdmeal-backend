@@ -34,9 +34,8 @@ tower-http = { version = "0.6", default-features = false, features = [
     "cors",
     "limit",
     "set-header",
-    "util",
 ] }
-# Tokio: "full" 대신 실제 사용 feature 만 (rt-multi-thread, net, time, sync, signal, macros, io-util).
+# Tokio: "full" 대신 실제 사용 feature 만 (rt-multi-thread, net, time, sync, signal, macros).
 tokio = { version = "1", default-features = false, features = [
     "rt-multi-thread",
     "macros",
@@ -44,7 +43,6 @@ tokio = { version = "1", default-features = false, features = [
     "time",
     "signal",
     "sync",
-    "io-util",
 ] }
 mongodb = { version = "3.7", default-features = false, features = ["compat-3-3-0", "bson-3", "rustls-tls", "dns-resolver"] }
 bson = { version = "3.1", features = ["chrono-0_4", "uuid-1"] }
@@ -77,26 +75,23 @@ opentelemetry = { version = "0.32", default-features = false, features = ["trace
 opentelemetry_sdk = { version = "0.32", default-features = false, features = ["trace"] }
 opentelemetry-otlp = { version = "0.32", default-features = false, features = ["grpc-tonic", "trace"] }
 dotenvy = "0.15"
-bs58 = "0.5"
 # regex: 패턴이 모두 ASCII-only 이지만 `\d` 가 unicode-perl 클래스에 의존.
 # unicode-age / unicode-script / unicode-segment / unicode-bool / unicode-case / unicode-gencat
 # (CJK / 이모지 / 케이스 폴딩 테이블) 는 제외 → 수백 KB 절감.
 regex = { version = "1", default-features = false, features = ["std", "perf", "unicode-perl"] }
-# rand: 전체 크레이트 대신 rand_core + rand_chacha 만 사용.
-rand_core = "0.6"
-rand_chacha = "0.3"
+# rand: retry jitter 용 thread-local RNG 만 사용.
+rand = "0.10"
 # futures: TryStreamExt 만 사용 → futures-util 로 교체.
 # futures 크레이트는 re-export 레이어일 뿐이지만, 빌드 시간과
 # resolve 오버헤드가 있으므로 직접 의존이 더 깔끔.
 futures-util = "0.3"
-futures-executor = "0.3"
 url = "2"
 subtle = "2"
 
 # 테스트 / 벤치 / 예제 빌드 시에만 활성화되는 추가 feature.
 # release 빌드에는 포함되지 않으므로, 런타임 바이너리 크기에 영향 없음.
 [dev-dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "signal", "sync", "io-util", "test-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time", "signal", "sync", "test-util"] }
 
 [lints.rust]
 unsafe_code = "forbid"
