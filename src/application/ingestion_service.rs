@@ -214,21 +214,6 @@ impl IngestionService {
         let data = self.data.clone();
         let neis = self.neis.clone();
         tokio::spawn(async move {
-            let key = format!(
-                "bg:range:{}:{}",
-                start.format("%Y-%m-%d"),
-                end.format("%Y-%m-%d")
-            );
-            {
-                let now = Instant::now();
-                let mut map: HashMap<String, Instant> = HashMap::new();
-                map.insert(key.clone(), now);
-                // 간이 cooldown — 메인 service 와 격리된 1회성 백그라운드 핸들이므로
-                // 동시성 문제 없음. 직전 실행 여부만 판단.
-                if map.contains_key(&key) {
-                    // 첫 실행이므로 항상 통과
-                }
-            }
             let _ = tokio::time::timeout(WEATHER_BACKGROUND_TIMEOUT, async move {
                 let fetched = neis
                     .fetch_all(start, end)

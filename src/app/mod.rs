@@ -55,46 +55,15 @@ pub async fn run() -> anyhow::Result<()> {
     ));
 
     // 시작 시: today-1 ~ today+10 미리 sync.
-    // 배치 upsert 를 컬렉션별로 병렬 실행해 warmup latency 최소화.
-    {
-        let neis = neis.clone();
-        let data = data.clone();
-        let start = crate::shared::timezone::today_kst_date() - chrono::Duration::days(1);
-        let end = crate::shared::timezone::today_kst_date() + chrono::Duration::days(10);
-        let res = tokio::time::timeout(Duration::from_secs(60), async move {
-            match neis.fetch_all(start, end).await {
-                Ok(fetched) => {
-                    let n_meals = fetched.meals.len();
-                    let n_schedules = fetched.schedules.len();
-                    let n_timetables = fetched.timetables.len();
-                    let (meals_res, schedules_res, timetables_res) = tokio::join!(
-                        data.upsert_meals_batch(&fetched.meals),
-                        data.upsert_schedules_batch(&fetched.schedules),
-                        data.upsert_timetables_batch(&fetched.timetables),
-                    );
-                    if let Err(e) = meals_res {
-                        tracing::warn!(error = %e, count = n_meals, "warmup: meals bulk upsert failed");
-                    } else {
-                        tracing::debug!(count = n_meals, "warmup: meals bulk upsert ok");
-                    }
-                    if let Err(e) = schedules_res {
-                        tracing::warn!(error = %e, count = n_schedules, "warmup: schedules bulk upsert failed");
-                    } else {
-                        tracing::debug!(count = n_schedules, "warmup: schedules bulk upsert ok");
-                    }
-                    if let Err(e) = timetables_res {
-                        tracing::warn!(error = %e, count = n_timetables, "warmup: timetables bulk upsert failed");
-                    } else {
-                        tracing::debug!(count = n_timetables, "warmup: timetables bulk upsert ok");
-                    }
-                }
-                Err(e) => tracing::warn!(error = %e, "initial warmup failed"),
-            }
-        })
-        .await;
-        if res.is_err() {
-            tracing::warn!("initial warmup timed out");
-        }
+    let warmup = tokio::time::timeout(
+        Duration::from_secs(60),
+        ctx.ingestion.sync_window_offset(1, 10),
+    )
+    .await;
+    match warmup {
+        Ok(Ok(status)) => tracing::debug!(?status, "initial warmup finished"),
+        Ok(Err(e)) => tracing::warn!(error = %e, "initial warmup failed"),
+        Err(_) => tracing::warn!("initial warmup timed out"),
     }
 
     // 3 시간 주기 sync_window
