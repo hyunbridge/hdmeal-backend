@@ -12,11 +12,10 @@
 //!   4. 알레르기 접미사 제거, 말미 `[ #&*-.=@_]+` 제거, `()` 제거.
 //!   5. `data/delicious.txt` 의 키워드를 포함하면 `⭐` 접두.
 
-use std::collections::{BTreeMap, BTreeSet};
-
-use chrono::NaiveDate;
+use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
+use chrono::NaiveDate;
 use regex::Regex;
 use serde::Deserialize;
 
@@ -27,15 +26,17 @@ use crate::domain::{
 };
 use crate::error::{HDMealError, HDMealResult};
 
-/// "⭐" 마킹할 키워드. 컴파일 타임에 `data/delicious.txt` 를 임베드.
 const DELICIOUS_KEYWORDS: &str = include_str!("../../../data/delicious.txt");
 
-static DELICIOUS_SET: LazyLock<BTreeSet<&'static str>> = LazyLock::new(|| {
-    DELICIOUS_KEYWORDS
+static DELICIOUS_VEC: LazyLock<Vec<&'static str>> = LazyLock::new(|| {
+    let mut v: Vec<&'static str> = DELICIOUS_KEYWORDS
         .lines()
         .map(|l| l.trim())
         .filter(|l| !l.is_empty())
-        .collect()
+        .collect();
+    v.sort_unstable();
+    v.dedup();
+    v
 });
 
 static ALLERGY_RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(\d+)\.").unwrap());
@@ -468,19 +469,15 @@ pub fn parse_ddish_nm(raw: &str) -> (Vec<MealMenuItem>, Vec<String>) {
             allergies.sort_unstable();
             allergies.dedup();
 
-            // (2) 알레르기 접미사 제거
-            let mut name = ALLERGY_RE.replace_all(trimmed, "").to_string();
-            // (3) 말미 [ #&*-.=@_]+ 제거
-            name = TRAILING_RE.replace(&name, "").to_string();
-            // (4) "()" 제거
+            let mut name = ALLERGY_RE.replace_all(trimmed, "").into_owned();
+            name = TRAILING_RE.replace(&name, "").into_owned();
             name = name.replace("()", "");
-            let name = name.trim().to_string();
+            let name = name.trim().to_owned();
             if name.is_empty() {
                 continue;
             }
 
-            // (5) delicious keyword 가 포함되면 ⭐ 마킹
-            let contains_delicious = DELICIOUS_SET.iter().any(|kw| name.contains(*kw));
+            let contains_delicious = DELICIOUS_VEC.iter().any(|kw| name.contains(*kw));
             let final_name = if contains_delicious {
                 format!("⭐{name}")
             } else {
@@ -513,10 +510,12 @@ impl HttpClient {
                     url.push('&');
                 }
                 first = false;
-                url.push_str(&format!(
-                    "{k}={}",
+                url.push_str(k);
+                url.push('=');
+                let encoded: String =
                     percent_encoding::utf8_percent_encode(v, percent_encoding::NON_ALPHANUMERIC)
-                ));
+                        .collect();
+                url.push_str(&encoded);
             }
         }
         let resp = self

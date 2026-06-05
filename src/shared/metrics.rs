@@ -15,7 +15,7 @@ use std::fmt::Write as _;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use parking_lot::Mutex;
+use std::sync::Mutex;
 
 /// 프로세스 시작 시각 (epoch seconds). 게이지 한 줄로 노출.
 pub struct Metrics {
@@ -45,7 +45,7 @@ impl Metrics {
 
     /// HTTP 요청 1 건을 카운트.
     pub fn record_request(&self, path: &str, method: &str, status: u16) {
-        let mut map = self.requests.lock();
+        let mut map = self.requests.lock().unwrap();
         let entry = map
             .entry(RequestKey {
                 path: path.to_owned(),
@@ -58,19 +58,12 @@ impl Metrics {
 
     /// Prometheus text format 직렬화.
     pub fn render(&self) -> String {
-        // 라인당 평균 ~80 바이트 가정. 64 entries 까지 in-place 로 처리.
         let mut out = String::with_capacity(1024);
         out.push_str("# HELP http_requests_total Total HTTP requests by path, method, status.\n");
         out.push_str("# TYPE http_requests_total counter\n");
 
-        // lock 보유 시간을 줄이기 위해 (key, count) 스냅샷만 복사.
-        let snapshot: Vec<(RequestKey, u64)> = {
-            let map = self.requests.lock();
-            map.iter().map(|(k, v)| (k.clone(), *v)).collect()
-        };
-
-        for (key, count) in &snapshot {
-            // 라벨 값 escape (`"` 와 `\`).
+        let map = self.requests.lock().unwrap();
+        for (key, count) in map.iter() {
             let _ = writeln!(
                 out,
                 "http_requests_total{{path=\"{}\",method=\"{}\",status=\"{}\"}} {}",
@@ -80,6 +73,7 @@ impl Metrics {
                 count,
             );
         }
+        drop(map);
 
         out.push_str(
             "# HELP process_start_time_seconds Unix epoch seconds when the process started.\n",
@@ -101,7 +95,15 @@ impl Default for Metrics {
 }
 
 fn escape_label(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            _ => out.push(ch),
+        }
+    }
+    out
 }
 
 #[cfg(test)]

@@ -106,29 +106,22 @@ fn extract_token(
     headers: &warp::http::HeaderMap,
     query: &HashMap<String, String>,
 ) -> Option<String> {
-    if let Some(v) = headers.get("X-HDMeal-Token") {
-        if let Ok(s) = v.to_str() {
-            let token = s.trim();
-            if !token.is_empty() {
-                return Some(token.to_string());
-            }
-        }
-    }
-    if let Some(v) = headers.get("authorization") {
-        if let Ok(s) = v.to_str() {
-            if let Some(rest) = s.strip_prefix("Bearer ") {
-                let token = rest.trim();
-                if !token.is_empty() {
-                    return Some(token.to_string());
-                }
-            }
-        }
-    }
-    query
-        .get("token")
-        .map(|s| s.trim())
-        .filter(|s| !s.is_empty())
-        .map(ToString::to_string)
+    let candidates = || -> [Option<&str>; 3] {
+        [
+            headers.get("X-HDMeal-Token").and_then(|v| v.to_str().ok()),
+            headers
+                .get("authorization")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|s| s.strip_prefix("Bearer ")),
+            query.get("token").map(String::as_str),
+        ]
+    };
+    candidates()
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .find(|s| !s.is_empty())
+        .map(str::to_owned)
 }
 
 async fn handle_skill(

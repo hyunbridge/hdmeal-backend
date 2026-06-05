@@ -63,12 +63,16 @@ bs58 = "0.5"
 # unicode-age / unicode-script / unicode-segment / unicode-bool / unicode-case / unicode-gencat
 # (CJK / 이모지 / 케이스 폴딩 테이블) 는 제외 → 수백 KB 절감.
 regex = { version = "1", default-features = false, features = ["std", "perf", "unicode-perl"] }
-rand = "0.10"
-parking_lot = "0.12"
-futures = "0.3"
+# rand: 전체 크레이트 대신 rand_core + rand_chacha 만 사용.
+rand_core = "0.6"
+rand_chacha = "0.3"
+# futures: TryStreamExt 만 사용 → futures-util 로 교체.
+# futures 크레이트는 re-export 레이어일 뿐이지만, 빌드 시간과
+# resolve 오버헤드가 있으므로 직접 의존이 더 깔끔.
+futures-util = "0.3"
+futures-executor = "0.3"
 url = "2"
 subtle = "2"
-percent-encoding = "2"
 
 # 테스트 / 벤치 / 예제 빌드 시에만 활성화되는 추가 feature.
 # release 빌드에는 포함되지 않으므로, 런타임 바이너리 크기에 영향 없음.
@@ -79,28 +83,10 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time",
 [lints.rust]
 unsafe_code = "forbid"
 
-# ----- Release profile (size + perf 극한) -----
-# - `lto = "fat"`: whole-program LTO 로 dead code / 중복 모노모피즈이션 적극 제거 → 가장 작은 바이너리.
-# - `panic = "abort"`: unwinding tables / landing pads 제거 → 크기 ↓, 약간의 perf ↑ (panic 은 그대로 발생).
-# - `codegen-units = 1`: inlining / 최적화 cross-module 활성화 (fat LTO 와 시너지).
-# - `opt-level = 3`: full optimization.
-# - `strip = "symbols"`: 최종 바이너리에서 symbol table 제거. panic 의 file:line 은 .symtab 제거로 사라지지만,
-#   prod 서버에서는 무시할 수 있는 trade-off. 더 줄이려면 `strip = true` (Rust 1.59+).
-# - `incremental = false`: release 에서 incremental compilation 비활성 (이미 기본이지만 명시).
-# - `build-override`: build.rs (proc-macro 등) 도 release 레벨로 컴파일.
+# ----- Release profile (size-focused, measured knobs only) -----
 [profile.release]
-opt-level = 3
+opt-level = "z"
 lto = "fat"
 codegen-units = 1
 panic = "abort"
-strip = "symbols"
-incremental = false
-debug = false
-
-[profile.release.build-override]
-opt-level = 3
-codegen-units = 1
-
-# 모든 의존성 패키지에 release 레벨 최적화 강제.
-[profile.release.package."*"]
-opt-level = 3
+strip = true

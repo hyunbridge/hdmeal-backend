@@ -9,8 +9,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::FutureExt;
-use parking_lot::Mutex;
+use futures_util::FutureExt;
+use std::sync::Mutex;
 use tokio::sync::Notify;
 use tokio::task::JoinHandle;
 
@@ -41,7 +41,7 @@ impl PeriodicTask {
         F: FnMut() -> Fut + Send + 'static,
         Fut: Future<Output = ()> + Send + 'static,
     {
-        let mut state = self.state.lock();
+        let mut state = self.state.lock().unwrap();
         if state.handle.is_some() {
             return;
         }
@@ -84,7 +84,7 @@ impl PeriodicTask {
     pub async fn stop(&self) {
         self.stop_requested.store(true, Ordering::SeqCst);
         let handle = {
-            let mut state = self.state.lock();
+            let mut state = self.state.lock().unwrap();
             self.notify_stop.notify_waiters();
             state.handle.take()
         };

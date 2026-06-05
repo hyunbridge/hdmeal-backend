@@ -13,7 +13,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, NaiveDate, Utc};
-use parking_lot::Mutex;
+use std::sync::Mutex;
 use tokio::sync::OnceCell;
 
 use crate::infrastructure::neis::neis::NeisClient;
@@ -65,7 +65,7 @@ impl IngestionService {
 
     fn check_cooldown(&self, key: &str) -> bool {
         let now = Instant::now();
-        let mut map = self.cooldown.lock();
+        let mut map = self.cooldown.lock().unwrap();
         if let Some(last) = map.get(key) {
             if now.duration_since(*last) < RANGE_COOLDOWN {
                 return true;
@@ -77,7 +77,7 @@ impl IngestionService {
 
     fn mark_cooldown(&self, key: &str) {
         let now = Instant::now();
-        let mut map = self.cooldown.lock();
+        let mut map = self.cooldown.lock().unwrap();
         map.insert(key.to_string(), now);
     }
 
@@ -87,7 +87,7 @@ impl IngestionService {
         Fut: std::future::Future<Output = Result<(), String>>,
     {
         let entry = {
-            let mut map = self.inflight.lock();
+            let mut map = self.inflight.lock().unwrap();
             map.entry(key.to_string())
                 .or_insert_with(|| {
                     Arc::new(InflightEntry {
@@ -107,7 +107,7 @@ impl IngestionService {
             .clone();
 
         {
-            let mut map = self.inflight.lock();
+            let mut map = self.inflight.lock().unwrap();
             if let Some(e) = map.get(key) {
                 if Arc::ptr_eq(e, &entry) {
                     map.remove(key);
@@ -159,7 +159,6 @@ impl IngestionService {
         }
         let data = self.data.clone();
         let neis = self.neis.clone();
-        let key_for_mark = key.clone();
         let res = self
             .singleflight(&key, || async move {
                 let fetched = neis
@@ -171,7 +170,7 @@ impl IngestionService {
             })
             .await;
         if res.is_ok() {
-            self.mark_cooldown(&key_for_mark);
+            self.mark_cooldown(&key);
             Ok(SyncStatus::Synced)
         } else {
             res.map(|_| SyncStatus::Synced)

@@ -306,7 +306,7 @@ mod tests {
                 "x-hdmeal-token, content-type",
             )
             .reply(&route);
-        let status = futures::executor::block_on(resp).status().as_u16();
+        let status = futures_executor::block_on(resp).status().as_u16();
         assert!(status < 500, "preflight should not 5xx: got {status}");
     }
 

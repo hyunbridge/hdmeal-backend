@@ -9,9 +9,10 @@ use std::sync::Arc;
 
 use bson::doc;
 use chrono::{DateTime, Utc};
+use futures_util::TryStreamExt as _;
 use mongodb::options::{IndexOptions, ReturnDocument};
 use mongodb::IndexModel;
-use parking_lot::Mutex;
+use std::sync::Mutex;
 
 use crate::config::AppConfig;
 use crate::domain::{
@@ -46,7 +47,7 @@ impl DataService {
     /// 모든 컬렉션에 unique 인덱스 생성. 멱등.
     pub async fn ensure_indexes(&self) -> HDMealResult<()> {
         {
-            let ready = self.indexes_ready.lock();
+            let ready = self.indexes_ready.lock().unwrap();
             if *ready {
                 return Ok(());
             }
@@ -78,7 +79,7 @@ impl DataService {
             .await?;
         self.coll.users.create_index(idx_user).await?;
 
-        let mut ready = self.indexes_ready.lock();
+        let mut ready = self.indexes_ready.lock().unwrap();
         *ready = true;
         Ok(())
     }
@@ -95,13 +96,8 @@ impl DataService {
         end: &str,
     ) -> HDMealResult<Vec<MealDocument>> {
         let filter = doc! {"date": {"$gte": start, "$lte": end}};
-        let mut cur = self.coll.meals.find(filter).await?;
-        let mut out = Vec::new();
-        use futures::TryStreamExt;
-        while let Some(m) = cur.try_next().await? {
-            out.push(m);
-        }
-        Ok(out)
+        let cur = self.coll.meals.find(filter).await?;
+        Ok(cur.try_collect().await?)
     }
 
     pub async fn upsert_meal(&self, meal: &MealDocument) -> HDMealResult<()> {
@@ -148,13 +144,8 @@ impl DataService {
         end: &str,
     ) -> HDMealResult<Vec<ScheduleDocument>> {
         let filter = doc! {"date": {"$gte": start, "$lte": end}};
-        let mut cur = self.coll.schedules.find(filter).await?;
-        let mut out = Vec::new();
-        use futures::TryStreamExt;
-        while let Some(m) = cur.try_next().await? {
-            out.push(m);
-        }
-        Ok(out)
+        let cur = self.coll.schedules.find(filter).await?;
+        Ok(cur.try_collect().await?)
     }
 
     pub async fn upsert_schedule(&self, schedule: &ScheduleDocument) -> HDMealResult<()> {
@@ -198,13 +189,8 @@ impl DataService {
         end: &str,
     ) -> HDMealResult<Vec<TimetableDocument>> {
         let filter = doc! {"date": {"$gte": start, "$lte": end}};
-        let mut cur = self.coll.timetables.find(filter).await?;
-        let mut out = Vec::new();
-        use futures::TryStreamExt;
-        while let Some(m) = cur.try_next().await? {
-            out.push(m);
-        }
-        Ok(out)
+        let cur = self.coll.timetables.find(filter).await?;
+        Ok(cur.try_collect().await?)
     }
 
     pub async fn upsert_timetable(&self, timetable: &TimetableDocument) -> HDMealResult<()> {

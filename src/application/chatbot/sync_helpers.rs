@@ -4,6 +4,7 @@
 //!   아니면 짧은 timeout 으로 fetch 시도 후 background 로 fallback.
 //! - [`preload_day_bundle`]: 특정 날짜의 (meal, schedule, timetable) 을 가져옴.
 
+use std::borrow::Cow;
 use std::time::Duration;
 
 use chrono::{DateTime, NaiveDate, Utc};
@@ -180,7 +181,7 @@ pub async fn preload_day_bundle(
 }
 
 /// UTC timestamp → "오전 12시" / "오후 3시" 등으로 변환 (KST 기준).
-pub fn hour_label_from_ts(ts: DateTime<Utc>) -> String {
+pub fn hour_label_from_ts(ts: DateTime<Utc>) -> Cow<'static, str> {
     use chrono::Timelike;
     let kst = ts.with_timezone(&crate::shared::timezone::KST);
     crate::shared::timezone::format_hour(kst.hour())

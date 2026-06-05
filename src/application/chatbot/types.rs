@@ -76,7 +76,7 @@ impl KakaoAction {
     /// `params.date_period.from.date` / `.to.date` 정규화.
     pub fn get_date_period(&self) -> Option<DatePeriod> {
         let v = self.params.get("date_period")?;
-        let obj = v.as_object()?.clone();
+        let obj = v.as_object()?;
         let from = obj.get("from").and_then(extract_date_field);
         let to = obj.get("to").and_then(extract_date_field);
         Some(DatePeriod { from, to })

@@ -128,8 +128,8 @@ impl KmaClient {
                         first_hour = it.fcst_time[0..2].to_string();
                     }
                 }
-                "SKY" if it.fcst_time == fcst_time => sky = map_sky(&it.fcst_value),
-                "PTY" if it.fcst_time == fcst_time => pty = map_pty(&it.fcst_value),
+                "SKY" if it.fcst_time == fcst_time => sky = map_sky(&it.fcst_value).to_string(),
+                "PTY" if it.fcst_time == fcst_time => pty = map_pty(&it.fcst_value).to_string(),
                 "POP" if it.fcst_time == fcst_time => pop = it.fcst_value.clone(),
                 "REH" if it.fcst_time == fcst_time => reh = it.fcst_value.clone(),
                 "TMN" if it.fcst_time == "0600" => tmn = it.fcst_value.clone(),
@@ -168,23 +168,23 @@ impl KmaClient {
     }
 }
 
-fn map_sky(v: &str) -> String {
+fn map_sky(v: &str) -> &'static str {
     match v {
-        "1" => "☀ 맑음".to_string(),
-        "3" => "🌥️ 구름 많음".to_string(),
-        "4" => "☁ 흐림".to_string(),
-        _ => "Unknown".to_string(),
+        "1" => "☀ 맑음",
+        "3" => "🌥️ 구름 많음",
+        "4" => "☁ 흐림",
+        _ => "Unknown",
     }
 }
 
-fn map_pty(v: &str) -> String {
+fn map_pty(v: &str) -> &'static str {
     match v {
-        "0" => "❌ 없음".to_string(),
-        "1" => "🌧️ 비".to_string(),
-        "2" => "🌨️ 비/눈".to_string(),
-        "3" => "🌨️ 눈".to_string(),
-        "4" => "🚿 소나기".to_string(),
-        _ => "⚠ 오류".to_string(),
+        "0" => "❌ 없음",
+        "1" => "🌧️ 비",
+        "2" => "🌨️ 비/눈",
+        "3" => "🌨️ 눈",
+        "4" => "🚿 소나기",
+        _ => "⚠ 오류",
     }
 }
 
@@ -214,29 +214,23 @@ fn compute_base_time(now_utc: DateTime<Utc>) -> (String, String) {
 }
 
 fn pick_representative_slot(items: &[KmaItem], today: NaiveDate) -> Option<(String, String)> {
-    // (today, 0900)
-    let s = format!("{}0900", today.format("%Y%m%d"));
+    let today_str = today.format("%Y%m%d").to_string();
     if items
         .iter()
-        .any(|i| i.fcst_date == s[0..8] && i.fcst_time == "0900")
+        .any(|i| i.fcst_date == today_str && i.fcst_time == "0900")
     {
-        return Some((s[0..8].to_string(), "0900".to_string()));
+        return Some((today_str, "0900".to_string()));
     }
-    // (tomorrow, 0900) — only after 17:00
-    let tomorrow = today + Duration::days(1);
-    let now = Utc::now().with_timezone(&KST);
-    let hour = now.hour();
-    let _ = hour;
-    if now.hour() >= 17 {
-        let s = format!("{}0900", tomorrow.format("%Y%m%d"));
+    if Utc::now().with_timezone(&KST).hour() >= 17 {
+        let tomorrow = today + Duration::days(1);
+        let tomorrow_str = tomorrow.format("%Y%m%d").to_string();
         if items
             .iter()
-            .any(|i| i.fcst_date == s[0..8] && i.fcst_time == "0900")
+            .any(|i| i.fcst_date == tomorrow_str && i.fcst_time == "0900")
         {
-            return Some((s[0..8].to_string(), "0900".to_string()));
+            return Some((tomorrow_str, "0900".to_string()));
         }
     }
-    // 첫 TMP
     items
         .iter()
         .find(|i| i.category == "TMP")
@@ -331,7 +325,7 @@ impl SeoulWaterClient {
     pub async fn fetch(&self) -> HDMealResult<SeoulWaterReading> {
         let encoded =
             percent_encoding::utf8_percent_encode(&self.token, percent_encoding::NON_ALPHANUMERIC)
-                .to_string();
+                .to_owned();
         let https_url = format!("{SEOUL_HTTPS_URL_TMPL}/{encoded}/json/WPOSInformationTime/1/5/");
         let http_url = format!("{SEOUL_HTTP_URL_TMPL}/{encoded}/json/WPOSInformationTime/1/5/");
 

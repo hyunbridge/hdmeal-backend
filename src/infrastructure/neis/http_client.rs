@@ -7,6 +7,8 @@
 
 use std::time::Duration;
 
+use rand_chacha::ChaCha8Rng;
+use rand_core::{RngCore, SeedableRng};
 use reqwest::header::{HeaderMap, RETRY_AFTER};
 use reqwest::{Client, Response, StatusCode};
 use tokio::time::sleep;
@@ -47,6 +49,11 @@ pub struct HttpClient {
 
 impl HttpClient {
     pub fn new() -> HDMealResult<Self> {
+        // reqwest `rustls-no-provider` 는 process-wide default provider 가 없으면
+        // ClientBuilder::build() 에서 panic. prod (app::run) 에서도 호출되지만 idempotent 하므로
+        // 테스트처럼 app 을 거치지 않는 경로에서도 안전하도록 한 번 더 호출.
+        let _ = rustls::crypto::ring::default_provider().install_default();
+
         let inner = reqwest::Client::builder()
             .pool_max_idle_per_host(10)
             .timeout(Duration::from_secs(15))
@@ -140,7 +147,10 @@ impl HttpClient {
     fn compute_delay_no_header(&self, attempt: u32) -> Duration {
         let base = self.policy.base_delay.as_millis() as u64;
         let exp = base.saturating_mul(1u64 << attempt);
-        let jitter = rand::random_range(0..base.max(1));
+        let jitter = {
+            let mut rng = ChaCha8Rng::from_entropy();
+            rng.next_u64() % base.max(1)
+        };
         Duration::from_millis(exp + jitter)
     }
 }

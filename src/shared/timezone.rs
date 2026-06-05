@@ -6,6 +6,8 @@
 //! - [`format_hour`]: "오전 12시" / "오후 3시" 등.
 //! - [`to_kst_iso`]: Mongo `created_at` 등을 응답 직렬화용 KST ISO8601 로.
 
+use std::borrow::Cow;
+
 use chrono::{DateTime, Datelike, FixedOffset, NaiveDate, NaiveDateTime, TimeZone, Utc};
 
 /// KST = UTC+9. 일광절약시간 없음.
@@ -81,10 +83,10 @@ const HOUR_LABELS: [&str; 25] = [
 ];
 
 /// "오전 12시" / "오전 3시" / "오후 12시" / "오후 3시" 등.
-pub fn format_hour(h: u32) -> String {
+pub fn format_hour(h: u32) -> Cow<'static, str> {
     match HOUR_LABELS.get(h as usize) {
-        Some(&s) => s.to_owned(),
-        None => format!("{h}시"),
+        Some(&s) => Cow::Borrowed(s),
+        None => Cow::Owned(format!("{h}시")),
     }
 }
 
