@@ -57,7 +57,10 @@ impl PeriodicTask {
             if let Err(e) = AssertUnwindSafe(tick_fn()).catch_unwind().await {
                 tracing::error!(error = ?e, "periodic task initial tick panicked");
             }
-            let mut ticker = tokio::time::interval(interval);
+            // `interval_at` 으로 첫 interval tick 을 `interval` 만큼 뒤로 미뤄
+            // start 직후 double-tick 을 방지.
+            let mut ticker =
+                tokio::time::interval_at(tokio::time::Instant::now() + interval, interval);
             ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 if stop_requested.load(Ordering::SeqCst) {
@@ -114,5 +117,38 @@ mod tests {
         task.stop().await;
         let n = counter.load(Ordering::SeqCst);
         assert!(n >= 1, "expected at least 1 tick, got {n}");
+    }
+
+    /// Start 직후 initial tick + interval tick 사이에 즉시 2회 tick 이
+    /// 실행되지 않아야 함 (regression guard for interval_at fix).
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn periodic_task_does_not_double_tick_at_start() {
+        let timestamps: Arc<Mutex<Vec<Duration>>> = Arc::new(Mutex::new(Vec::new()));
+        let timestamps2 = timestamps.clone();
+        let start = tokio::time::Instant::now();
+        let task = PeriodicTask::new(Duration::from_millis(100));
+        task.start(move || {
+            let t = timestamps2.clone();
+            async move {
+                let elapsed = start.elapsed();
+                t.lock().unwrap().push(elapsed);
+            }
+        });
+        // initial tick 이후 interval 한 번 이상 진행될 때까지 대기.
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        task.stop().await;
+        let log = timestamps.lock().unwrap().clone();
+        assert!(
+            log.len() >= 2,
+            "expected at least initial + 1 interval tick, got {log:?}"
+        );
+        // 첫 interval tick 은 정확히 interval (100ms) 부근이어야 함.
+        // interval() 으로 만들면 첫 tick 이 즉시 와서 gap 이 ~0 이 됨.
+        let gap = log[1].saturating_sub(log[0]);
+        assert!(
+            gap >= Duration::from_millis(95),
+            "second tick fired too soon after initial: gap={:?} (log={log:?})",
+            gap
+        );
     }
 }
