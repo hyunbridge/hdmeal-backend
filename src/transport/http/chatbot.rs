@@ -18,6 +18,9 @@ use crate::transport::http::dto::user_settings::{
     UpdateUserSettingsRequest, UserSettingsMessage, UserSettingsPreferences, UserSettingsResponse,
 };
 
+const SKILL_BODY_LIMIT_BYTES: u64 = 64 * 1024;
+const USER_SETTINGS_BODY_LIMIT_BYTES: u64 = 8 * 1024;
+
 pub fn routes(
     ctx: Arc<AppContext>,
 ) -> impl Filter<Extract = (warp::reply::Response,), Error = warp::Rejection> + Clone {
@@ -31,6 +34,7 @@ pub fn routes(
     let skill = warp::path("skill")
         .and(warp::path::end())
         .and(warp::post())
+        .and(warp::body::content_length_limit(SKILL_BODY_LIMIT_BYTES))
         .and(warp::body::json())
         .and(warp::any().map(move || ctx_skill.clone()))
         .and(warp::header::headers_cloned())
@@ -56,6 +60,9 @@ pub fn routes(
         .and(warp::path("settings"))
         .and(warp::path::end())
         .and(warp::patch())
+        .and(warp::body::content_length_limit(
+            USER_SETTINGS_BODY_LIMIT_BYTES,
+        ))
         .and(warp::body::json())
         .and(warp::any().map(move || ctx_patch.clone()))
         .and(warp::header::headers_cloned())
@@ -112,7 +119,15 @@ fn extract_token(
             headers
                 .get("authorization")
                 .and_then(|v| v.to_str().ok())
-                .and_then(|s| s.strip_prefix("Bearer ")),
+                .and_then(|s| {
+                    let mut parts = s.trim().splitn(2, char::is_whitespace);
+                    match (parts.next(), parts.next()) {
+                        (Some(scheme), Some(token)) if scheme.eq_ignore_ascii_case("bearer") => {
+                            Some(token)
+                        }
+                        _ => None,
+                    }
+                }),
             query.get("token").map(String::as_str),
         ]
     };
@@ -323,6 +338,13 @@ mod tests {
     #[test]
     fn extract_token_falls_back_to_bearer_header() {
         let h = headers_with(&[("authorization", "Bearer beta")]);
+        let q = empty_query();
+        assert_eq!(extract_token(&h, &q), Some("beta".to_string()));
+    }
+
+    #[test]
+    fn extract_token_accepts_trimmed_lowercase_bearer_header() {
+        let h = headers_with(&[("authorization", "  bEaReR   beta  ")]);
         let q = empty_query();
         assert_eq!(extract_token(&h, &q), Some("beta".to_string()));
     }
