@@ -107,7 +107,7 @@ pub fn inject_response_headers(headers: &mut warp::http::HeaderMap, cx: &opentel
 pub fn write_request_id_headers(headers: &mut warp::http::HeaderMap, request_id: &str) {
     if let Ok(v) = warp::http::HeaderValue::from_str(request_id) {
         headers.insert("X-Request-ID", v.clone());
-        headers.insert("X-HDMeal-Req-ID", v.clone());
+        headers.insert("X-HDMeal-Req-ID", v);
     }
 }
 

@@ -62,14 +62,15 @@ pub fn issue_user_token(input: IssueUserTokenInput<'_>) -> HDMealResult<String> 
         return Err(HDMealError::internal("JWT secret is empty"));
     }
     let now = Utc::now();
+    let uid = input.uid.to_owned();
     let claims = UserTokenClaims {
         iss: JWT_ISSUER.to_string(),
-        sub: input.uid.to_string(),
+        sub: uid.clone(),
         jti: crate::shared::context::new_request_id(),
         iat: now.timestamp(),
         nbf: now.timestamp(),
         exp: (now + input.ttl).timestamp(),
-        uid: input.uid.to_string(),
+        uid,
         scope: input.scope,
         req_id: input.req_id.to_string(),
     };
@@ -112,13 +113,12 @@ pub fn validate_user_token(input: ValidateUserTokenInput<'_>) -> HDMealResult<Us
 
 /// `uid` 가 `"platform:external_id"` 형식인지 검증. 빈 부분이 있으면 에러.
 pub fn split_uid(uid: &str) -> HDMealResult<(&str, &str)> {
-    let mut it = uid.splitn(2, ':');
-    let platform = it.next().unwrap_or("");
-    let external = it.next().unwrap_or("");
-    if platform.is_empty() || external.is_empty() {
-        return Err(HDMealError::bad_request("올바르지 않은 토큰입니다."));
+    match uid.split_once(':') {
+        Some((platform, external)) if !platform.is_empty() && !external.is_empty() => {
+            Ok((platform, external))
+        }
+        _ => Err(HDMealError::bad_request("올바르지 않은 토큰입니다.")),
     }
-    Ok((platform, external))
 }
 
 #[cfg(test)]

@@ -119,7 +119,10 @@ async fn handle_days(
             schedule,
             timetable,
         });
-        d = d.succ_opt().unwrap_or(d);
+        let Some(next) = d.succ_opt() else {
+            break;
+        };
+        d = next;
     }
 
     let body = DaysResponse {
