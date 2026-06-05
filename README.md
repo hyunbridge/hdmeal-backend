@@ -14,7 +14,7 @@
 ## 기술 스택
 
 - Rust 1.75+ (Edition 2021)
-- Warp 0.3 + Tokio (multi-thread runtime)
+- Warp 0.4 + Tokio (multi-thread runtime)
 - MongoDB 공식 드라이버 3.x (async, `rustls-tls`)
 - Serde / BSON / Chrono
 - `jsonwebtoken` 9 (HS256, RustCrypto — `aws-lc-rs` 미사용)
