@@ -60,8 +60,8 @@ fn jwt_full_workflow() {
 
 #[test]
 fn jwt_expired_is_rejected() {
-    // Issue a token with TTL well in the past. jsonwebtoken's default leeway is 60s,
-    // so we need exp to be more than 60s in the past to force rejection.
+    // Issue a token with TTL well in the past. Current leeway is 30s,
+    // so we need exp to be more than 30s in the past to force rejection.
     let secret = "test";
     let req_id = hdmeal_backend::shared::context::new_request_id();
     let token = hdmeal_backend::shared::security::issue_user_token(IssueUserTokenInput {
@@ -211,4 +211,28 @@ fn update_user_settings_deserialize_korean_string() {
     let req: UpdateUserSettingsRequest = serde_json::from_value(raw).unwrap();
     assert_eq!(req.user_grade, 2);
     assert_eq!(req.user_class, 5);
+}
+
+#[test]
+fn skill_token_constant_time_all_checked() {
+    use hdmeal_backend::shared::security::authorize_skill_token;
+    let allowed = vec!["alpha".to_string(), "beta".to_string()];
+    assert!(authorize_skill_token(Some("alpha"), &allowed));
+    assert!(authorize_skill_token(Some("beta"), &allowed));
+    assert!(!authorize_skill_token(Some("gamma"), &allowed));
+    assert!(!authorize_skill_token(None, &allowed));
+    // 빈 allowed 벡터에 대해 항상 false
+    assert!(!authorize_skill_token(Some("any"), &[]));
+}
+
+#[test]
+fn metrics_atomic_counter() {
+    use hdmeal_backend::shared::metrics::Metrics;
+    let m = Metrics::new();
+    m.record_request("/healthz", "GET", 200);
+    m.record_request("/healthz", "GET", 200);
+    m.record_request("/healthz", "GET", 500);
+    let rendered = m.render();
+    assert!(rendered.contains(r#"path="/healthz",method="GET",status="200"} 2"#));
+    assert!(rendered.contains(r#"path="/healthz",method="GET",status="500"} 1"#));
 }

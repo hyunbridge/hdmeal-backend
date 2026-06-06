@@ -11,6 +11,8 @@ use std::time::Duration;
 use anyhow::{anyhow, Result as AnyhowResult};
 use url::Url;
 
+use crate::shared::security::hash_skill_token;
+
 /// 글로벌 앱 설정. 한 번 로드되면 사실상 불변.
 #[derive(Debug, Clone)]
 pub struct AppConfig {
@@ -33,7 +35,7 @@ pub struct AppConfig {
 
     pub seoul_data_token: String,
 
-    pub auth_tokens: Vec<String>,
+    pub auth_token_hashes: Vec<[u8; 32]>,
     pub jwt_secret: String,
     pub base_url: Url,
 
@@ -86,6 +88,10 @@ impl AppConfig {
         if auth_tokens.is_empty() {
             return Err(anyhow!("HDMeal_AuthTokens 가 필요합니다."));
         }
+        let auth_token_hashes = auth_tokens
+            .iter()
+            .map(|token| hash_skill_token(token))
+            .collect();
         let jwt_secret = required("HDMeal_JWTSecret")?;
         let base_url = Url::parse(&required("HDMeal_BaseURL")?)?;
 
@@ -139,7 +145,7 @@ impl AppConfig {
             kma_nx,
             kma_ny,
             seoul_data_token,
-            auth_tokens,
+            auth_token_hashes,
             jwt_secret,
             base_url,
             allowed_origins,
@@ -173,11 +179,13 @@ fn parse_u64(key: &str) -> Option<u64> {
 }
 
 fn parse_bool(key: &str) -> Option<bool> {
-    match env::var(key).ok()?.to_ascii_lowercase().as_str() {
-        "true" | "1" | "yes" | "on" => Some(true),
-        "false" | "0" | "no" | "off" | "" => Some(false),
-        _ => None,
-    }
+    std::env::var(key)
+        .ok()
+        .and_then(|v| match v.trim().to_ascii_lowercase().as_str() {
+            "true" | "1" | "yes" | "on" => Some(true),
+            "false" | "0" | "no" | "off" | "" => Some(false),
+            _ => None,
+        })
 }
 
 /// JSON 배열 문자열을 우선 파싱, 실패하면 콤마 구분으로 분리.

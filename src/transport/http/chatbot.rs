@@ -14,7 +14,7 @@ use crate::application::chatbot::types::{KakaoSkillRequest, KakaoSkillResponse};
 use crate::error::HDMealError;
 use crate::shared::observability::RequestContext;
 use crate::shared::security::{
-    authorize_skill_token, scope, split_uid, validate_user_token, ValidateUserTokenInput,
+    authorize_skill_token_hashed, scope, split_uid, validate_user_token, ValidateUserTokenInput,
 };
 use crate::transport::http::dto::api::CacheHealthcheckResponse;
 use crate::transport::http::dto::user_settings::{
@@ -82,7 +82,7 @@ async fn skill(
     Json(req): Json<KakaoSkillRequest>,
 ) -> Result<Response, HDMealError> {
     let token = extract_token(&headers, &query);
-    if !authorize_skill_token(token.as_deref(), &state.ctx.config.auth_tokens) {
+    if !authorize_skill_token_hashed(token.as_deref(), &state.ctx.config.auth_token_hashes) {
         return Err(HDMealError::unauthorized("Unauthorized"));
     }
     let messages = state.ctx.chatbot.dispatch_internal(&req).await?;
