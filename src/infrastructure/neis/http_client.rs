@@ -118,7 +118,7 @@ impl HttpClient {
                     }
                     let delay = self.compute_delay(&r, attempt);
                     tracing::warn!(
-                        url = %url,
+                        url = %sanitize_url(url),
                         status = %r.status(),
                         attempt = attempt + 1,
                         "retrying after status"
@@ -133,7 +133,7 @@ impl HttpClient {
                         return Err(HDMealError::Http(e));
                     }
                     tracing::warn!(
-                        url = %url,
+                        url = %sanitize_url(url),
                         error = %e,
                         attempt = attempt + 1,
                         "retrying after error"
@@ -159,16 +159,43 @@ impl HttpClient {
 
     fn compute_delay_no_header(&self, attempt: u32) -> Duration {
         let base = self.policy.base_delay.as_millis() as u64;
-        let exp = base.saturating_mul(1u64 << attempt);
+        let multiplier = 1u64.checked_shl(attempt).unwrap_or(u64::MAX);
+        let exp = base.saturating_mul(multiplier);
         let jitter = rand::rng().random_range(0..base.max(1));
-        Duration::from_millis(exp + jitter)
+        Duration::from_millis(exp.saturating_add(jitter))
     }
 }
 
-impl Default for HttpClient {
-    fn default() -> Self {
-        Self::new().expect("reqwest client build")
+fn sanitize_url(raw: &str) -> String {
+    let Ok(mut url) = Url::parse(raw) else {
+        return "<invalid url>".to_string();
+    };
+    let pairs: Vec<(String, String)> = url
+        .query_pairs()
+        .map(|(k, v)| {
+            let value = if is_sensitive_query_key(&k) {
+                "<redacted>".to_string()
+            } else {
+                v.into_owned()
+            };
+            (k.into_owned(), value)
+        })
+        .collect();
+    if !pairs.is_empty() {
+        url.query_pairs_mut().clear().extend_pairs(
+            pairs
+                .iter()
+                .map(|(key, value)| (key.as_str(), value.as_str())),
+        );
     }
+    url.into()
+}
+
+fn is_sensitive_query_key(key: &str) -> bool {
+    matches!(
+        key.to_ascii_lowercase().as_str(),
+        "key" | "servicekey" | "token" | "apikey" | "api_key"
+    )
 }
 
 #[cfg(test)]
@@ -184,5 +211,17 @@ mod tests {
         // attempt=2: 2000 + [0,500) = [2000, 2500)
         assert!((500..1000).contains(&d0), "got {d0}");
         assert!((2000..2500).contains(&d2), "got {d2}");
+    }
+
+    #[test]
+    fn sanitize_url_redacts_known_secret_query_keys() {
+        let url =
+            sanitize_url("https://example.test/path?KEY=neis&serviceKey=kma&foo=bar&token=tok");
+        assert!(url.contains("KEY=%3Credacted%3E"), "{url}");
+        assert!(url.contains("serviceKey=%3Credacted%3E"), "{url}");
+        assert!(url.contains("token=%3Credacted%3E"), "{url}");
+        assert!(url.contains("foo=bar"), "{url}");
+        assert!(!url.contains("neis"), "{url}");
+        assert!(!url.contains("kma"), "{url}");
     }
 }

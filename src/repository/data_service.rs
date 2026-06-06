@@ -125,10 +125,11 @@ impl DataService {
         if meals.is_empty() {
             return Ok(());
         }
+        let meals = dedup_by_date(meals, |m| m.date.as_str());
         let dates: Vec<&str> = meals.iter().map(|m| m.date.as_str()).collect();
         let filter = doc! {"date": {"$in": &dates}};
         self.coll.meals.delete_many(filter).await?;
-        self.coll.meals.insert_many(meals).ordered(false).await?;
+        self.coll.meals.insert_many(&meals).ordered(false).await?;
         Ok(())
     }
 
@@ -163,12 +164,13 @@ impl DataService {
         if schedules.is_empty() {
             return Ok(());
         }
+        let schedules = dedup_by_date(schedules, |s| s.date.as_str());
         let dates: Vec<&str> = schedules.iter().map(|s| s.date.as_str()).collect();
         let filter = doc! {"date": {"$in": &dates}};
         self.coll.schedules.delete_many(filter).await?;
         self.coll
             .schedules
-            .insert_many(schedules)
+            .insert_many(&schedules)
             .ordered(false)
             .await?;
         Ok(())
@@ -211,12 +213,13 @@ impl DataService {
         if timetables.is_empty() {
             return Ok(());
         }
+        let timetables = dedup_by_date(timetables, |t| t.date.as_str());
         let dates: Vec<&str> = timetables.iter().map(|t| t.date.as_str()).collect();
         let filter = doc! {"date": {"$in": &dates}};
         self.coll.timetables.delete_many(filter).await?;
         self.coll
             .timetables
-            .insert_many(timetables)
+            .insert_many(&timetables)
             .ordered(false)
             .await?;
         Ok(())
@@ -448,6 +451,18 @@ fn build_empty_timetable(
             )
         })
         .collect()
+}
+
+fn dedup_by_date<T, F>(items: &[T], date: F) -> Vec<T>
+where
+    T: Clone,
+    F: Fn(&T) -> &str,
+{
+    let mut by_date = BTreeMap::new();
+    for item in items {
+        by_date.insert(date(item).to_string(), item.clone());
+    }
+    by_date.into_values().collect()
 }
 
 #[derive(Debug, Clone)]

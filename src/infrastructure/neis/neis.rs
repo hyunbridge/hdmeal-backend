@@ -79,7 +79,9 @@ impl NeisClient {
         params.push(("MLSV_TO_YMD", end.format("%Y%m%d").to_string()));
         let url = format!("{NEIS_BASE}/mealServiceDietInfo");
         let raw: serde_json::Value = self.http.get_json_with_params(&url, &params).await?;
-        let info = extract_service(&raw, "mealServiceDietInfo")?;
+        let Some(info) = extract_service(&raw, "mealServiceDietInfo")? else {
+            return Ok(Vec::new());
+        };
         let rows = info
             .get("row")
             .and_then(|r| r.as_array())
@@ -88,8 +90,9 @@ impl NeisClient {
         let mut out = Vec::new();
         for row in rows {
             let row: MealRow = serde_json::from_value(row)?;
-            let date = parse_neis_ymd(&row.MLSV_YMD)
-                .ok_or_else(|| HDMealError::internal("invalid MLSV_YMD"))?;
+            let date = parse_neis_ymd(&row.MLSV_YMD).ok_or_else(|| {
+                HDMealError::internal(format!("invalid MLSV_YMD {}", row.MLSV_YMD))
+            })?;
             let (menus, plain) = parse_ddish_nm(&row.DDISH_NM);
             let calories = row
                 .CAL_INFO
@@ -118,7 +121,9 @@ impl NeisClient {
         params.push(("AA_TO_YMD", end.format("%Y%m%d").to_string()));
         let url = format!("{NEIS_BASE}/SchoolSchedule");
         let raw: serde_json::Value = self.http.get_json_with_params(&url, &params).await?;
-        let info = extract_service(&raw, "SchoolSchedule")?;
+        let Some(info) = extract_service(&raw, "SchoolSchedule")? else {
+            return Ok(Vec::new());
+        };
         let rows = info
             .get("row")
             .and_then(|r| r.as_array())
@@ -131,7 +136,7 @@ impl NeisClient {
                 continue;
             }
             let date = parse_neis_ymd(&row.AA_YMD)
-                .ok_or_else(|| HDMealError::internal("invalid AA_YMD"))?;
+                .ok_or_else(|| HDMealError::internal(format!("invalid AA_YMD {}", row.AA_YMD)))?;
             let mut grades = Vec::new();
             if row.ONE_GRADE_EVENT_YN == "Y" {
                 grades.push(1);
@@ -203,7 +208,9 @@ impl NeisClient {
         first_params.push(("pSize", TIMETABLE_PAGE_SIZE.to_string()));
         let url = format!("{NEIS_BASE}/hisTimetable");
         let first: serde_json::Value = self.http.get_json_with_params(&url, &first_params).await?;
-        let info = extract_service(&first, "hisTimetable")?;
+        let Some(info) = extract_service(&first, "hisTimetable")? else {
+            return Ok(Vec::new());
+        };
         let total = extract_list_total(info);
         if total == 0 {
             return Ok(Vec::new());
@@ -221,12 +228,14 @@ impl NeisClient {
             let url = url.clone();
             handles.push(tokio::spawn(async move {
                 let raw: serde_json::Value = http.get_json_with_params(&url, &p_params).await?;
-                let info = extract_service(&raw, "hisTimetable")?;
-                let rows = info
-                    .get("row")
-                    .and_then(|r| r.as_array())
-                    .cloned()
-                    .unwrap_or_default();
+                let rows = match extract_service(&raw, "hisTimetable")? {
+                    Some(info) => info
+                        .get("row")
+                        .and_then(|r| r.as_array())
+                        .cloned()
+                        .unwrap_or_default(),
+                    None => Vec::new(),
+                };
                 Ok::<_, HDMealError>(rows)
             }));
         }
@@ -257,13 +266,15 @@ impl NeisClient {
             let c = row.CLASS_NM.to_string();
             let perio = row.PERIO;
             let subject = row.ITRT_CNTNT;
+            if perio == 0 {
+                tracing::warn!("skipping timetable row with PERIO=0 for {}", date_str);
+                continue;
+            }
 
             let inner = lessons.entry(g).or_default();
             let arr = inner.entry(c).or_default();
             let idx = perio.saturating_sub(1) as usize;
-            while arr.len() <= idx {
-                arr.push(String::new());
-            }
+            arr.resize(idx + 1, String::new());
             arr[idx] = subject;
         }
         Ok(vec![TimetableDocument {
@@ -282,11 +293,21 @@ impl NeisClient {
         let timetable_dates: Vec<NaiveDate> = date_range(start, end);
         let neis = self.clone();
         let timetables = async move {
+            let handles: Vec<_> = timetable_dates
+                .into_iter()
+                .map(|d| {
+                    let neis = neis.clone();
+                    tokio::spawn(async move { (d, neis.fetch_timetables(d).await) })
+                })
+                .collect();
             let mut out = Vec::new();
-            for d in timetable_dates {
-                match neis.fetch_timetables(d).await {
-                    Ok(mut v) => out.append(&mut v),
-                    Err(e) => tracing::warn!(error = %e, "timetable fetch failed for {}", d),
+            for handle in handles {
+                match handle.await {
+                    Ok((_, Ok(mut v))) => out.append(&mut v),
+                    Ok((d, Err(e))) => {
+                        tracing::warn!(error = %e, "timetable fetch failed for {}", d);
+                    }
+                    Err(e) => tracing::warn!(error = %e, "timetable date task join failed"),
                 }
             }
             Ok::<_, HDMealError>(out)
@@ -338,29 +359,58 @@ struct NeisResultInfo {
 }
 
 /// raw JSON envelope 에서 serviceName 의 head / row 추출 + RESULT.INFO-000 검증.
-fn extract_service<'a>(v: &'a serde_json::Value, key: &str) -> HDMealResult<&'a serde_json::Value> {
-    let info = v
+/// NEIS 는 무데이터를 root `RESULT.INFO-200` 으로 반환하므로 `Ok(None)` 으로 표현한다.
+fn extract_service<'a>(
+    v: &'a serde_json::Value,
+    key: &str,
+) -> HDMealResult<Option<&'a serde_json::Value>> {
+    let Some(info) = v
         .get(key)
         .and_then(|x| x.as_array())
         .and_then(|arr| arr.first())
-        .ok_or_else(|| HDMealError::not_found(format!("missing NEIS key {key}")))?;
-    if let Some(head) = info
-        .get("head")
-        .and_then(|h| h.as_array())
-        .and_then(|a| a.first())
-    {
-        if let Some(r) = head.get("RESULT") {
-            let code = r.get("code").and_then(|c| c.as_str()).unwrap_or("");
+    else {
+        if is_no_data_result(v) {
+            return Ok(None);
+        }
+        return Err(HDMealError::not_found(format!("missing NEIS key {key}")));
+    };
+    if let Some(head_items) = info.get("head").and_then(|h| h.as_array()) {
+        for head in head_items {
+            let Some(r) = head.get("RESULT") else {
+                continue;
+            };
+            let code = neis_result_field(r, "code", "CODE").unwrap_or("");
+            if code == "INFO-200" {
+                return Ok(None);
+            }
             if code != "INFO-000" {
                 let msg = r
                     .get("message")
+                    .or_else(|| r.get("MESSAGE"))
                     .and_then(|m| m.as_str())
                     .unwrap_or("NEIS error");
                 return Err(HDMealError::service_unavailable(format!("NEIS: {msg}")));
             }
         }
     }
-    Ok(info)
+    Ok(Some(info))
+}
+
+fn is_no_data_result(v: &serde_json::Value) -> bool {
+    v.get("RESULT")
+        .and_then(|r| neis_result_field(r, "code", "CODE"))
+        == Some("INFO-200")
+}
+
+fn neis_result_field<'a>(
+    result: &'a serde_json::Value,
+    lower: &str,
+    upper: &str,
+) -> Option<&'a str> {
+    result
+        .get(lower)
+        .or_else(|| result.get(upper))
+        .and_then(|v| v.as_str())
 }
 
 fn extract_list_total(v: &serde_json::Value) -> u32 {
@@ -441,13 +491,9 @@ fn date_range(start: NaiveDate, end: NaiveDate) -> Vec<NaiveDate> {
 }
 
 fn parse_neis_ymd(s: &str) -> Option<String> {
-    if s.len() != 8 {
-        return None;
-    }
-    let y = s[0..4].parse::<i32>().ok()?;
-    let m = s[4..6].parse::<u32>().ok()?;
-    let d = s[6..8].parse::<u32>().ok()?;
-    NaiveDate::from_ymd_opt(y, m, d).map(|d| d.format("%Y-%m-%d").to_string())
+    NaiveDate::parse_from_str(s, "%Y%m%d")
+        .ok()
+        .map(|d| d.format("%Y-%m-%d").to_string())
 }
 
 /// `DDISH_NM` (e.g. `<br/>` 포함 HTML 문자열) 을 파싱해 (메뉴, 알레르기) 쌍과
@@ -530,5 +576,55 @@ mod tests {
     fn parse_neis_ymd_valid() {
         assert_eq!(parse_neis_ymd("20240301"), Some("2024-03-01".to_string()));
         assert!(parse_neis_ymd("2024-03-01").is_none());
+    }
+
+    #[test]
+    fn extract_service_treats_root_info_200_as_no_data() {
+        let raw = serde_json::json!({
+            "RESULT": {
+                "CODE": "INFO-200",
+                "MESSAGE": "해당하는 데이터가 없습니다."
+            }
+        });
+
+        assert!(extract_service(&raw, "mealServiceDietInfo")
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn extract_service_treats_service_info_200_as_no_data() {
+        let raw = serde_json::json!({
+            "hisTimetable": [{
+                "head": [{
+                    "RESULT": {
+                        "CODE": "INFO-200",
+                        "MESSAGE": "해당하는 데이터가 없습니다."
+                    }
+                }]
+            }]
+        });
+
+        assert!(extract_service(&raw, "hisTimetable").unwrap().is_none());
+    }
+
+    #[test]
+    fn extract_service_rejects_non_success_result() {
+        let raw = serde_json::json!({
+            "SchoolSchedule": [{
+                "head": [
+                    {"list_total_count": 1},
+                    {
+                        "RESULT": {
+                            "CODE": "ERROR-300",
+                            "MESSAGE": "인증 실패"
+                        }
+                    }
+                ]
+            }]
+        });
+
+        let err = extract_service(&raw, "SchoolSchedule").unwrap_err();
+        assert_eq!(err.status(), axum::http::StatusCode::SERVICE_UNAVAILABLE);
     }
 }
