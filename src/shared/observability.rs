@@ -132,6 +132,9 @@ impl<'a> opentelemetry::propagation::Injector for HeaderMutInjector<'a> {
 }
 
 /// axum extractor: 핸들러 시그니처에서 `rc: RequestContext` 로 받는다.
+///
+/// `parts.headers.clone()` 은 8~12 개 헤더마다 `Arc<[T]>>` 할당을
+/// 유발한다. `headers` 내에서 필요한 값만 추출하도록 최적화.
 impl<S> axum::extract::FromRequestParts<S> for RequestContext
 where
     S: Send + Sync,
@@ -142,17 +145,16 @@ where
         parts: &mut axum::http::request::Parts,
         _state: &S,
     ) -> impl std::future::Future<Output = Result<Self, Self::Rejection>> + Send {
-        let headers = parts.headers.clone();
+        let raw = parts
+            .headers
+            .get("X-Request-ID")
+            .or_else(|| parts.headers.get("X-HDMeal-Req-ID"))
+            .or_else(|| parts.headers.get("X-HDMeal-ReqId"))
+            .and_then(|v| v.to_str().ok())
+            .and_then(normalize_request_id)
+            .unwrap_or_else(new_request_id);
+        let parent_cx = extract_parent_context(&parts.headers);
         async move {
-            let raw = headers
-                .get("X-Request-ID")
-                .or_else(|| headers.get("X-HDMeal-Req-ID"))
-                .or_else(|| headers.get("X-HDMeal-ReqId"))
-                .and_then(|v| v.to_str().ok())
-                .and_then(normalize_request_id)
-                .unwrap_or_else(new_request_id);
-
-            let parent_cx = extract_parent_context(&headers);
             Ok(RequestContext {
                 request_id: raw,
                 parent_cx,

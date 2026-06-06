@@ -12,6 +12,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{Json, Router};
 use mongodb::Client as MongoClient;
+use tower::ServiceBuilder;
 use tower_http::cors::CorsLayer;
 use tower_http::set_header::SetResponseHeaderLayer;
 
@@ -59,7 +60,8 @@ pub fn cors_layer(config: &AppConfig) -> CorsLayer {
             HeaderName::from_static("x-hdmeal-req-id"),
             HeaderName::from_static("traceparent"),
             HeaderName::from_static("tracestate"),
-        ]);
+        ])
+        .allow_credentials(config.allow_credentials);
     if config.allowed_origins.iter().any(|o| o == "*") {
         layer = layer.allow_origin(tower_http::cors::Any);
     } else {
@@ -69,9 +71,6 @@ pub fn cors_layer(config: &AppConfig) -> CorsLayer {
             .filter_map(|o| HeaderValue::from_str(o).ok())
             .collect();
         layer = layer.allow_origin(origins);
-    }
-    if config.allow_credentials {
-        layer = layer.allow_credentials(true);
     }
     layer
 }
@@ -205,34 +204,42 @@ pub fn build_router(
         .fallback(fallback_404);
 
     // layer 추가 순서 = outermost → innermost.
-    //   request: CORS → security → request_id → inject_observability → metrics → handler
-    //   response: handler → metrics → inject_observability → request_id → security → CORS
+    // request: CORS → security_headers → request_id → inject_observability → metrics → handler
+    // response: handler → metrics → inject_observability → request_id → security_headers → CORS
+    //
+    // 보안 헤더는 `add_security_headers()` 가 에러 envelope 에도 부착되어
+    // 있으나, 정상 응답에는 layer 로 일괄 적용하는 것이 더 깔끔하다.
+    // `SetResponseHeaderLayer::overriding` 은 이미 존재하는 헤더를
+    // 덮어쓰므로 이중 부착 걱정이 없다.
+    let security = ServiceBuilder::new()
+        .layer(SetResponseHeaderLayer::overriding(
+            axum::http::header::STRICT_TRANSPORT_SECURITY,
+            HeaderValue::from_static("max-age=31536000"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            HeaderName::from_static("x-content-type-options"),
+            HeaderValue::from_static("nosniff"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            HeaderName::from_static("x-frame-options"),
+            HeaderValue::from_static("DENY"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            HeaderName::from_static("content-security-policy"),
+            HeaderValue::from_static("default-src 'none'"),
+        ))
+        .layer(SetResponseHeaderLayer::overriding(
+            HeaderName::from_static("referrer-policy"),
+            HeaderValue::from_static("no-referrer"),
+        ));
+
     api.layer(middleware::from_fn_with_state(
         state.clone(),
         metrics_recorder,
     ))
     .layer(middleware::from_fn(inject_observability_headers))
     .layer(middleware::from_fn(request_id_middleware))
-    .layer(SetResponseHeaderLayer::overriding(
-        axum::http::header::STRICT_TRANSPORT_SECURITY,
-        HeaderValue::from_static("max-age=31536000"),
-    ))
-    .layer(SetResponseHeaderLayer::overriding(
-        HeaderName::from_static("x-content-type-options"),
-        HeaderValue::from_static("nosniff"),
-    ))
-    .layer(SetResponseHeaderLayer::overriding(
-        HeaderName::from_static("x-frame-options"),
-        HeaderValue::from_static("DENY"),
-    ))
-    .layer(SetResponseHeaderLayer::overriding(
-        HeaderName::from_static("content-security-policy"),
-        HeaderValue::from_static("default-src 'none'"),
-    ))
-    .layer(SetResponseHeaderLayer::overriding(
-        HeaderName::from_static("referrer-policy"),
-        HeaderValue::from_static("no-referrer"),
-    ))
+    .layer(security)
     .layer(cors_layer(&config))
     .with_state(state)
 }
@@ -357,7 +364,7 @@ mod tests {
             kma_nx: 60,
             kma_ny: 127,
             seoul_data_token: "k".to_string(),
-            auth_tokens: vec!["secret".to_string()],
+            auth_token_hashes: vec![crate::shared::security::hash_skill_token("secret")],
             jwt_secret: "secret".to_string(),
             base_url: Url::parse("http://localhost").unwrap(),
             allowed_origins: vec![],
