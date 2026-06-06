@@ -17,7 +17,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Build cache 효율: 의존성만 먼저 빌드
 COPY Cargo.toml Cargo.lock* ./
 RUN mkdir -p src && echo "fn main(){}" > src/main.rs && echo "" > src/lib.rs \
-    && CARGO_TARGET_DIR=/app/target cargo build --release --bin hdmeal-backend \
+    && CARGO_TARGET_DIR=/app/target cargo build --release --locked --bin hdmeal-backend \
     && rm -rf /app/target/release/deps/hdmeal_backend* /app/target/release/hdmeal-backend*
 
 # 실제 소스 빌드
@@ -26,7 +26,7 @@ COPY data ./data
 
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 
-RUN cargo build --release --bin hdmeal-backend \
+RUN cargo build --release --locked --bin hdmeal-backend \
     && ls -la /app/target/release/hdmeal-backend
 
 # ---- runtime ----
