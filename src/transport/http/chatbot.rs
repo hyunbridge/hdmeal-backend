@@ -48,23 +48,30 @@ pub fn router() -> Router<RouterState> {
 /// 우선순위 (보안상 안전한 순서):
 ///   1. `X-HDMeal-Token` 헤더
 ///   2. `Authorization: Bearer <token>` 헤더
-///   3. `?token=` 쿼리 (proxy 로그에 남으므로 최후 수단)
-fn extract_token(headers: &HeaderMap, query: &HashMap<String, String>) -> Option<String> {
+///   3. `?token=` 쿼리 (debug 모드에서만 허용)
+fn extract_token(
+    headers: &HeaderMap,
+    query: &HashMap<String, String>,
+    allow_query_token: bool,
+) -> Option<String> {
+    let bearer = headers
+        .get("authorization")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| {
+            let (scheme, token) = s.trim().split_once(' ')?;
+            if scheme.eq_ignore_ascii_case("bearer") {
+                Some(token.trim_matches(' '))
+            } else {
+                None
+            }
+        });
+    let query_token = allow_query_token
+        .then(|| query.get("token").map(String::as_str))
+        .flatten();
     let candidates: [Option<&str>; 3] = [
         headers.get("X-HDMeal-Token").and_then(|v| v.to_str().ok()),
-        headers
-            .get("authorization")
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| {
-                let mut parts = s.trim().splitn(2, char::is_whitespace);
-                match (parts.next(), parts.next()) {
-                    (Some(scheme), Some(token)) if scheme.eq_ignore_ascii_case("bearer") => {
-                        Some(token)
-                    }
-                    _ => None,
-                }
-            }),
-        query.get("token").map(String::as_str),
+        bearer,
+        query_token,
     ];
     candidates
         .into_iter()
@@ -81,7 +88,7 @@ async fn skill(
     Query(query): Query<HashMap<String, String>>,
     Json(req): Json<KakaoSkillRequest>,
 ) -> Result<Response, HDMealError> {
-    let token = extract_token(&headers, &query);
+    let token = extract_token(&headers, &query, state.ctx.config.debug);
     if !authorize_skill_token_hashed(token.as_deref(), &state.ctx.config.auth_token_hashes) {
         return Err(HDMealError::unauthorized("Unauthorized"));
     }
@@ -96,7 +103,7 @@ async fn get_user_settings(
     headers: HeaderMap,
     Query(query): Query<HashMap<String, String>>,
 ) -> Result<Response, HDMealError> {
-    let token = extract_token(&headers, &query)
+    let token = extract_token(&headers, &query, state.ctx.config.debug)
         .ok_or_else(|| HDMealError::unauthorized("토큰이 없습니다."))?;
     let claims = validate_user_token(ValidateUserTokenInput {
         token: &token,
@@ -132,7 +139,7 @@ async fn patch_user_settings(
     Query(query): Query<HashMap<String, String>>,
     Json(req): Json<UpdateUserSettingsRequest>,
 ) -> Result<Response, HDMealError> {
-    let token = extract_token(&headers, &query)
+    let token = extract_token(&headers, &query, state.ctx.config.debug)
         .ok_or_else(|| HDMealError::unauthorized("토큰이 없습니다."))?;
     let claims = validate_user_token(ValidateUserTokenInput {
         token: &token,
@@ -168,7 +175,7 @@ async fn delete_user_settings(
     headers: HeaderMap,
     Query(query): Query<HashMap<String, String>>,
 ) -> Result<Response, HDMealError> {
-    let token = extract_token(&headers, &query)
+    let token = extract_token(&headers, &query, state.ctx.config.debug)
         .ok_or_else(|| HDMealError::unauthorized("토큰이 없습니다."))?;
     let claims = validate_user_token(ValidateUserTokenInput {
         token: &token,
@@ -261,29 +268,37 @@ mod tests {
     fn extract_token_prefers_x_hdmeal_token_header() {
         let h = headers_with(&[("X-HDMeal-Token", "alpha")]);
         let q = empty_query();
-        assert_eq!(extract_token(&h, &q), Some("alpha".to_string()));
+        assert_eq!(extract_token(&h, &q, false), Some("alpha".to_string()));
     }
 
     #[test]
     fn extract_token_falls_back_to_bearer_header() {
         let h = headers_with(&[("authorization", "Bearer beta")]);
         let q = empty_query();
-        assert_eq!(extract_token(&h, &q), Some("beta".to_string()));
+        assert_eq!(extract_token(&h, &q, false), Some("beta".to_string()));
     }
 
     #[test]
     fn extract_token_accepts_trimmed_lowercase_bearer_header() {
         let h = headers_with(&[("authorization", "  bEaReR   beta  ")]);
         let q = empty_query();
-        assert_eq!(extract_token(&h, &q), Some("beta".to_string()));
+        assert_eq!(extract_token(&h, &q, false), Some("beta".to_string()));
     }
 
     #[test]
-    fn extract_token_falls_back_to_query() {
+    fn extract_token_rejects_query_by_default() {
         let h = headers_with(&[]);
         let mut q = empty_query();
         q.insert("token".to_string(), "gamma".to_string());
-        assert_eq!(extract_token(&h, &q), Some("gamma".to_string()));
+        assert_eq!(extract_token(&h, &q, false), None);
+    }
+
+    #[test]
+    fn extract_token_allows_query_when_enabled() {
+        let h = headers_with(&[]);
+        let mut q = empty_query();
+        q.insert("token".to_string(), "gamma".to_string());
+        assert_eq!(extract_token(&h, &q, true), Some("gamma".to_string()));
     }
 
     #[test]
@@ -291,7 +306,7 @@ mod tests {
         let h = headers_with(&[("X-HDMeal-Token", "alpha")]);
         let mut q = empty_query();
         q.insert("token".to_string(), "gamma".to_string());
-        assert_eq!(extract_token(&h, &q), Some("alpha".to_string()));
+        assert_eq!(extract_token(&h, &q, true), Some("alpha".to_string()));
     }
 
     #[test]
@@ -299,34 +314,41 @@ mod tests {
         let h = headers_with(&[("authorization", "Bearer beta")]);
         let mut q = empty_query();
         q.insert("token".to_string(), "gamma".to_string());
-        assert_eq!(extract_token(&h, &q), Some("beta".to_string()));
+        assert_eq!(extract_token(&h, &q, true), Some("beta".to_string()));
     }
 
     #[test]
     fn extract_token_trims_whitespace() {
         let h = headers_with(&[("X-HDMeal-Token", "  alpha  ")]);
         let q = empty_query();
-        assert_eq!(extract_token(&h, &q), Some("alpha".to_string()));
+        assert_eq!(extract_token(&h, &q, false), Some("alpha".to_string()));
     }
 
     #[test]
     fn extract_token_rejects_empty() {
         let h = headers_with(&[("X-HDMeal-Token", "   ")]);
         let q = empty_query();
-        assert_eq!(extract_token(&h, &q), None);
+        assert_eq!(extract_token(&h, &q, false), None);
     }
 
     #[test]
     fn extract_token_rejects_bearer_without_prefix() {
         let h = headers_with(&[("authorization", "Basic dXNlcjpwYXNz")]);
         let q = empty_query();
-        assert_eq!(extract_token(&h, &q), None);
+        assert_eq!(extract_token(&h, &q, false), None);
+    }
+
+    #[test]
+    fn extract_token_rejects_tab_separated_bearer() {
+        let h = headers_with(&[("authorization", "Bearer\tbeta")]);
+        let q = empty_query();
+        assert_eq!(extract_token(&h, &q, false), None);
     }
 
     #[test]
     fn extract_token_returns_none_when_all_empty() {
         let h = headers_with(&[]);
         let q = empty_query();
-        assert_eq!(extract_token(&h, &q), None);
+        assert_eq!(extract_token(&h, &q, false), None);
     }
 }

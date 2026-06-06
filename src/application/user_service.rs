@@ -8,6 +8,8 @@ use crate::domain::{UserDocument, UserPreferences, ALLOWED_PREFERENCE_KEYS};
 use crate::error::{HDMealError, HDMealResult};
 use crate::repository::DataService;
 
+const MAX_PREFERENCE_VALUE_LEN: usize = 64;
+
 pub struct UserService {
     data: Arc<DataService>,
 }
@@ -62,9 +64,15 @@ impl UserService {
             }
         }
         // preferences 검증
+        if input.preferences.len() > ALLOWED_PREFERENCE_KEYS.len() {
+            return Err(HDMealError::bad_request("올바르지 않은 요청입니다."));
+        }
         let mut allergy: Option<String> = None;
         for (k, v) in &input.preferences {
             if !ALLOWED_PREFERENCE_KEYS.contains(&k.as_str()) {
+                return Err(HDMealError::bad_request("올바르지 않은 요청입니다."));
+            }
+            if v.len() > MAX_PREFERENCE_VALUE_LEN {
                 return Err(HDMealError::bad_request("올바르지 않은 요청입니다."));
             }
             if k == "AllergyInfo" && !UserPreferences::is_valid_allergy_info(v) {
