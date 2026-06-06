@@ -44,7 +44,7 @@ impl AppContext {
             ingestion.clone(),
             kma.clone(),
             seoul_water.clone(),
-            (*config).clone(),
+            config.clone(),
         ));
         Self {
             data,

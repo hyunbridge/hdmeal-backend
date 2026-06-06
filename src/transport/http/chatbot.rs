@@ -1,9 +1,8 @@
-//! `/skill/`, `/user/settings/`, `/cache/healthcheck/` 핸들러.
+//! `/skill/`, `/cache/healthcheck/` 핸들러.
 
 use std::collections::HashMap;
 
 use axum::extract::{Query, State};
-use axum::handler::Handler;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -13,71 +12,21 @@ use tower_http::limit::RequestBodyLimitLayer;
 use crate::application::chatbot::types::{KakaoSkillRequest, KakaoSkillResponse};
 use crate::error::HDMealError;
 use crate::shared::observability::RequestContext;
-use crate::shared::security::{
-    authorize_skill_token_hashed, scope, split_uid, validate_user_token, ValidateUserTokenInput,
-};
+use crate::shared::security::authorize_skill_token_hashed;
+use crate::transport::http::auth::extract_token;
 use crate::transport::http::dto::api::CacheHealthcheckResponse;
-use crate::transport::http::dto::user_settings::{
-    UpdateUserSettingsRequest, UserSettingsMessage, UserSettingsPreferences, UserSettingsResponse,
-};
 use crate::transport::http::RouterState;
 
 const SKILL_BODY_LIMIT_BYTES: usize = 64 * 1024;
-const USER_SETTINGS_BODY_LIMIT_BYTES: usize = 8 * 1024;
 
 pub fn router() -> Router<RouterState> {
     let skill_route = post(skill).layer(RequestBodyLimitLayer::new(SKILL_BODY_LIMIT_BYTES));
-    let user_settings_route = get(get_user_settings)
-        .patch(
-            patch_user_settings.layer(RequestBodyLimitLayer::new(USER_SETTINGS_BODY_LIMIT_BYTES)),
-        )
-        .delete(delete_user_settings);
 
     Router::new()
         .route("/skill", skill_route.clone())
         .route("/skill/", skill_route)
-        .route("/user/settings", user_settings_route.clone())
-        .route("/user/settings/", user_settings_route)
         .route("/cache/healthcheck", get(cache_healthcheck))
         .route("/cache/healthcheck/", get(cache_healthcheck))
-}
-
-/// 통합 토큰 추출: 모든 인증 엔드포인트에서 동일한 우선순위로 토큰을 찾는다.
-///
-/// 우선순위 (보안상 안전한 순서):
-///   1. `X-HDMeal-Token` 헤더
-///   2. `Authorization: Bearer <token>` 헤더
-///   3. `?token=` 쿼리 (debug 모드에서만 허용)
-fn extract_token(
-    headers: &HeaderMap,
-    query: &HashMap<String, String>,
-    allow_query_token: bool,
-) -> Option<String> {
-    let bearer = headers
-        .get("authorization")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| {
-            let (scheme, token) = s.trim().split_once(' ')?;
-            if scheme.eq_ignore_ascii_case("bearer") {
-                Some(token.trim_matches(' '))
-            } else {
-                None
-            }
-        });
-    let query_token = allow_query_token
-        .then(|| query.get("token").map(String::as_str))
-        .flatten();
-    let candidates: [Option<&str>; 3] = [
-        headers.get("X-HDMeal-Token").and_then(|v| v.to_str().ok()),
-        bearer,
-        query_token,
-    ];
-    candidates
-        .into_iter()
-        .flatten()
-        .map(str::trim)
-        .find(|s| !s.is_empty())
-        .map(str::to_owned)
 }
 
 async fn skill(
@@ -94,106 +43,6 @@ async fn skill(
     let messages = state.ctx.chatbot.dispatch_internal(&req).await?;
     let resp: KakaoSkillResponse = KakaoSkillResponse::from_messages(messages);
     Ok((StatusCode::OK, Json(resp)).into_response())
-}
-
-async fn get_user_settings(
-    State(state): State<RouterState>,
-    _rc: RequestContext,
-    headers: HeaderMap,
-    Query(query): Query<HashMap<String, String>>,
-) -> Result<Response, HDMealError> {
-    let token = extract_token(&headers, &query, state.ctx.config.debug)
-        .ok_or_else(|| HDMealError::unauthorized("토큰이 없습니다."))?;
-    let claims = validate_user_token(ValidateUserTokenInput {
-        token: &token,
-        secret: &state.ctx.config.jwt_secret,
-        required_scope: scope::GET_USER_INFO,
-    })?;
-    let (platform, external_id) = split_uid(&claims.uid)?;
-    let user = state
-        .ctx
-        .user_service
-        .ensure_user(platform, external_id)
-        .await?;
-    let body = UserSettingsResponse {
-        grades: (1..=state.ctx.config.num_of_grades as i32).collect(),
-        classes: (1..=state.ctx.config.num_of_classes as i32).collect(),
-        current_grade: user.grade,
-        current_class: user.class_no,
-        preferences: UserSettingsPreferences {
-            allergy_info: if user.preferences.allergy_info.is_empty() {
-                "Number".to_string()
-            } else {
-                user.preferences.allergy_info.clone()
-            },
-        },
-    };
-    Ok((StatusCode::OK, Json(body)).into_response())
-}
-
-async fn patch_user_settings(
-    State(state): State<RouterState>,
-    _rc: RequestContext,
-    headers: HeaderMap,
-    Query(query): Query<HashMap<String, String>>,
-    Json(req): Json<UpdateUserSettingsRequest>,
-) -> Result<Response, HDMealError> {
-    let token = extract_token(&headers, &query, state.ctx.config.debug)
-        .ok_or_else(|| HDMealError::unauthorized("토큰이 없습니다."))?;
-    let claims = validate_user_token(ValidateUserTokenInput {
-        token: &token,
-        secret: &state.ctx.config.jwt_secret,
-        required_scope: scope::MANAGE_USER_INFO,
-    })?;
-    let (platform, external_id) = split_uid(&claims.uid)?;
-    let input = crate::application::user_service::UpdateUserInput {
-        grade: Some(Some(req.user_grade)),
-        class_no: Some(Some(req.user_class)),
-        preferences: req.preferences,
-    };
-    state
-        .ctx
-        .user_service
-        .update_user(
-            platform,
-            external_id,
-            input,
-            state.ctx.config.num_of_grades,
-            state.ctx.config.num_of_classes,
-        )
-        .await?;
-    let body = UserSettingsMessage {
-        message: "저장했습니다.".to_string(),
-    };
-    Ok((StatusCode::OK, Json(body)).into_response())
-}
-
-async fn delete_user_settings(
-    State(state): State<RouterState>,
-    _rc: RequestContext,
-    headers: HeaderMap,
-    Query(query): Query<HashMap<String, String>>,
-) -> Result<Response, HDMealError> {
-    let token = extract_token(&headers, &query, state.ctx.config.debug)
-        .ok_or_else(|| HDMealError::unauthorized("토큰이 없습니다."))?;
-    let claims = validate_user_token(ValidateUserTokenInput {
-        token: &token,
-        secret: &state.ctx.config.jwt_secret,
-        required_scope: scope::MANAGE_USER_INFO,
-    })?;
-    let (platform, external_id) = split_uid(&claims.uid)?;
-    let ok = state
-        .ctx
-        .user_service
-        .delete_user(platform, external_id)
-        .await?;
-    if !ok {
-        return Err(HDMealError::not_found("사용자 정보가 없습니다."));
-    }
-    let body = UserSettingsMessage {
-        message: "삭제했습니다.".to_string(),
-    };
-    Ok((StatusCode::OK, Json(body)).into_response())
 }
 
 async fn cache_healthcheck(
@@ -241,113 +90,4 @@ async fn cache_healthcheck(
         water_temperature: water,
     };
     Ok((StatusCode::OK, Json(body)).into_response())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use axum::http::{HeaderMap, HeaderValue};
-
-    fn headers_with(pairs: &[(&str, &str)]) -> HeaderMap {
-        let mut h = HeaderMap::new();
-        for (k, v) in pairs {
-            h.insert(
-                axum::http::HeaderName::from_bytes(k.as_bytes()).unwrap(),
-                HeaderValue::from_str(v).unwrap(),
-            );
-        }
-        h
-    }
-
-    fn empty_query() -> HashMap<String, String> {
-        HashMap::new()
-    }
-
-    #[test]
-    fn extract_token_prefers_x_hdmeal_token_header() {
-        let h = headers_with(&[("X-HDMeal-Token", "alpha")]);
-        let q = empty_query();
-        assert_eq!(extract_token(&h, &q, false), Some("alpha".to_string()));
-    }
-
-    #[test]
-    fn extract_token_falls_back_to_bearer_header() {
-        let h = headers_with(&[("authorization", "Bearer beta")]);
-        let q = empty_query();
-        assert_eq!(extract_token(&h, &q, false), Some("beta".to_string()));
-    }
-
-    #[test]
-    fn extract_token_accepts_trimmed_lowercase_bearer_header() {
-        let h = headers_with(&[("authorization", "  bEaReR   beta  ")]);
-        let q = empty_query();
-        assert_eq!(extract_token(&h, &q, false), Some("beta".to_string()));
-    }
-
-    #[test]
-    fn extract_token_rejects_query_by_default() {
-        let h = headers_with(&[]);
-        let mut q = empty_query();
-        q.insert("token".to_string(), "gamma".to_string());
-        assert_eq!(extract_token(&h, &q, false), None);
-    }
-
-    #[test]
-    fn extract_token_allows_query_when_enabled() {
-        let h = headers_with(&[]);
-        let mut q = empty_query();
-        q.insert("token".to_string(), "gamma".to_string());
-        assert_eq!(extract_token(&h, &q, true), Some("gamma".to_string()));
-    }
-
-    #[test]
-    fn extract_token_priority_header_over_query() {
-        let h = headers_with(&[("X-HDMeal-Token", "alpha")]);
-        let mut q = empty_query();
-        q.insert("token".to_string(), "gamma".to_string());
-        assert_eq!(extract_token(&h, &q, true), Some("alpha".to_string()));
-    }
-
-    #[test]
-    fn extract_token_priority_bearer_over_query() {
-        let h = headers_with(&[("authorization", "Bearer beta")]);
-        let mut q = empty_query();
-        q.insert("token".to_string(), "gamma".to_string());
-        assert_eq!(extract_token(&h, &q, true), Some("beta".to_string()));
-    }
-
-    #[test]
-    fn extract_token_trims_whitespace() {
-        let h = headers_with(&[("X-HDMeal-Token", "  alpha  ")]);
-        let q = empty_query();
-        assert_eq!(extract_token(&h, &q, false), Some("alpha".to_string()));
-    }
-
-    #[test]
-    fn extract_token_rejects_empty() {
-        let h = headers_with(&[("X-HDMeal-Token", "   ")]);
-        let q = empty_query();
-        assert_eq!(extract_token(&h, &q, false), None);
-    }
-
-    #[test]
-    fn extract_token_rejects_bearer_without_prefix() {
-        let h = headers_with(&[("authorization", "Basic dXNlcjpwYXNz")]);
-        let q = empty_query();
-        assert_eq!(extract_token(&h, &q, false), None);
-    }
-
-    #[test]
-    fn extract_token_rejects_tab_separated_bearer() {
-        let h = headers_with(&[("authorization", "Bearer\tbeta")]);
-        let q = empty_query();
-        assert_eq!(extract_token(&h, &q, false), None);
-    }
-
-    #[test]
-    fn extract_token_returns_none_when_all_empty() {
-        let h = headers_with(&[]);
-        let q = empty_query();
-        assert_eq!(extract_token(&h, &q, false), None);
-    }
 }

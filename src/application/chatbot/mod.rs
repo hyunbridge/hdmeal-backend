@@ -28,7 +28,7 @@ pub struct Service {
     pub ingestion: Arc<IngestionService>,
     pub kma: Arc<KmaClient>,
     pub seoul_water: Arc<SeoulWaterClient>,
-    pub config: AppConfig,
+    pub config: Arc<AppConfig>,
 }
 
 impl Service {
@@ -38,7 +38,7 @@ impl Service {
         ingestion: Arc<IngestionService>,
         kma: Arc<KmaClient>,
         seoul_water: Arc<SeoulWaterClient>,
-        config: AppConfig,
+        config: Arc<AppConfig>,
     ) -> Self {
         Self {
             data,

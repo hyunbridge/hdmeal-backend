@@ -1,8 +1,10 @@
 //! Axum 라우터 / 미들웨어 조립.
 
 pub mod app_api;
+pub mod auth;
 pub mod chatbot;
 pub mod dto;
+pub mod user_settings;
 
 use std::sync::Arc;
 
@@ -192,7 +194,7 @@ pub fn build_router(
     let app_routes = app_api::router();
 
     // /skill/, /user/settings/, /cache/healthcheck/
-    let bot_routes = chatbot::router();
+    let bot_routes = chatbot::router().merge(user_settings::router());
 
     let api: Router<RouterState> = Router::new()
         .route("/healthz", get(handlers::healthz))

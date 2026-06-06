@@ -54,7 +54,7 @@ pub async fn handle_meal(
     }
 
     let (meal, schedule, _timetable) = preload_day_bundle(svc, date).await;
-    if meal.is_none() {
+    let Some(meal) = meal else {
         let schedule_text = schedule
             .as_ref()
             .and_then(|s| s.summary.as_ref())
@@ -69,8 +69,7 @@ pub async fn handle_meal(
             ))]);
         }
         return Ok(vec![Message::Text("등록된 데이터가 없습니다.".to_string())]);
-    }
-    let meal = meal.unwrap();
+    };
 
     // AllergyInfo preference 조회
     let user = svc.users.ensure_user(platform, external_id).await?;
