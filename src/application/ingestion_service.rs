@@ -127,7 +127,7 @@ impl IngestionService {
     async fn persist_fetched(
         data: &DataService,
         fetched: &crate::infrastructure::neis::neis::NeisFetchAll,
-    ) {
+    ) -> Result<(), String> {
         // 3 컬렉션을 병렬 upsert. Mongo connection pool 이 충분히 크므로
         // round-trip latency 가 직렬 → 3-way overlap 으로 줄어듦.
         let (meals_res, schedules_res, timetables_res) = tokio::join!(
@@ -135,8 +135,10 @@ impl IngestionService {
             data.upsert_schedules_batch(&fetched.schedules),
             data.upsert_timetables_batch(&fetched.timetables),
         );
+        let mut errors = Vec::new();
         if let Err(e) = meals_res {
             tracing::warn!(error = %e, count = fetched.meals.len(), "upsert_meals_batch failed");
+            errors.push(("meals", e.to_string()));
         }
         if let Err(e) = schedules_res {
             tracing::warn!(
@@ -144,6 +146,7 @@ impl IngestionService {
                 count = fetched.schedules.len(),
                 "upsert_schedules_batch failed"
             );
+            errors.push(("schedules", e.to_string()));
         }
         if let Err(e) = timetables_res {
             tracing::warn!(
@@ -151,7 +154,9 @@ impl IngestionService {
                 count = fetched.timetables.len(),
                 "upsert_timetables_batch failed"
             );
+            errors.push(("timetables", e.to_string()));
         }
+        persist_error_message(&errors).map_or(Ok(()), Err)
     }
 
     /// 주어진 (start, end) 구간의 데이터를 동기화.
@@ -172,7 +177,7 @@ impl IngestionService {
                     .fetch_all(start, end)
                     .await
                     .map_err(|e| e.to_string())?;
-                Self::persist_fetched(&data, &fetched).await;
+                Self::persist_fetched(&data, &fetched).await?;
                 Ok::<_, String>(())
             })
             .await;
@@ -226,7 +231,9 @@ impl IngestionService {
                     .fetch_all(start, end)
                     .await
                     .map_err(|e| e.to_string())?;
-                Self::persist_fetched(&data, &fetched).await;
+                if let Err(e) = Self::persist_fetched(&data, &fetched).await {
+                    tracing::warn!(error = %e, "background range persist failed");
+                }
                 Ok::<_, String>(())
             })
             .await;
@@ -236,6 +243,19 @@ impl IngestionService {
 
 fn prune_locked(now: Instant, map: &mut HashMap<String, Instant>) {
     map.retain(|_, t| now.saturating_duration_since(*t) < RECENT_SYNC_TTL);
+}
+
+fn persist_error_message(errors: &[(&'static str, String)]) -> Option<String> {
+    if errors.is_empty() {
+        return None;
+    }
+    Some(
+        errors
+            .iter()
+            .map(|(label, error)| format!("{label}: {error}"))
+            .collect::<Vec<_>>()
+            .join("; "),
+    )
 }
 
 pub const SYNC_TIMEOUT_RANGE_DURATION: Duration = SYNC_TIMEOUT_RANGE;
@@ -262,5 +282,16 @@ mod tests {
             chrono::Utc::now() - chrono::Duration::seconds(120),
             Duration::from_secs(60),
         ));
+    }
+
+    #[test]
+    fn persist_error_message_includes_all_failed_collections() {
+        let msg = persist_error_message(&[
+            ("meals", "duplicate key".to_string()),
+            ("timetables", "network".to_string()),
+        ])
+        .unwrap();
+
+        assert_eq!(msg, "meals: duplicate key; timetables: network");
     }
 }
