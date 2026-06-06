@@ -26,21 +26,20 @@ const SKILL_BODY_LIMIT_BYTES: usize = 64 * 1024;
 const USER_SETTINGS_BODY_LIMIT_BYTES: usize = 8 * 1024;
 
 pub fn router() -> Router<RouterState> {
+    let skill_route = post(skill).layer(RequestBodyLimitLayer::new(SKILL_BODY_LIMIT_BYTES));
+    let user_settings_route = get(get_user_settings)
+        .patch(
+            patch_user_settings.layer(RequestBodyLimitLayer::new(USER_SETTINGS_BODY_LIMIT_BYTES)),
+        )
+        .delete(delete_user_settings);
+
     Router::new()
-        .route(
-            "/skill",
-            post(skill).layer(RequestBodyLimitLayer::new(SKILL_BODY_LIMIT_BYTES)),
-        )
-        .route(
-            "/user/settings",
-            get(get_user_settings)
-                .patch(
-                    patch_user_settings
-                        .layer(RequestBodyLimitLayer::new(USER_SETTINGS_BODY_LIMIT_BYTES)),
-                )
-                .delete(delete_user_settings),
-        )
+        .route("/skill", skill_route.clone())
+        .route("/skill/", skill_route)
+        .route("/user/settings", user_settings_route.clone())
+        .route("/user/settings/", user_settings_route)
         .route("/cache/healthcheck", get(cache_healthcheck))
+        .route("/cache/healthcheck/", get(cache_healthcheck))
 }
 
 /// 통합 토큰 추출: 모든 인증 엔드포인트에서 동일한 우선순위로 토큰을 찾는다.
