@@ -57,8 +57,8 @@ impl WeatherView {
 /// KMA 클라이언트.
 #[derive(Clone)]
 pub struct KmaClient {
-    pub http: HttpClient,
-    pub config: AppConfig,
+    http: HttpClient,
+    config: AppConfig,
 }
 
 impl KmaClient {
@@ -313,8 +313,8 @@ const SEOUL_HTTP_URL_TMPL: &str = "http://openapi.seoul.go.kr:8088";
 
 #[derive(Debug, Clone)]
 pub struct SeoulWaterClient {
-    pub http: HttpClient,
-    pub token: String,
+    http: HttpClient,
+    token: String,
 }
 
 impl SeoulWaterClient {

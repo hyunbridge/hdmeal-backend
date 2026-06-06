@@ -12,7 +12,7 @@ use chrono::{DateTime, Utc};
 use futures_util::TryStreamExt as _;
 use mongodb::options::{IndexOptions, ReturnDocument};
 use mongodb::IndexModel;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::config::AppConfig;
 use crate::domain::{
@@ -28,7 +28,7 @@ use super::{get_collections, Client, Collections};
 pub struct DataService {
     pub coll: Collections,
     empty_timetable: Arc<BTreeMap<String, BTreeMap<String, Vec<String>>>>,
-    indexes_ready: Arc<Mutex<bool>>,
+    indexes_ready: Arc<AtomicBool>,
 }
 
 impl DataService {
@@ -38,19 +38,20 @@ impl DataService {
         let svc = Self {
             coll,
             empty_timetable: Arc::new(empty_timetable),
-            indexes_ready: Arc::new(Mutex::new(false)),
+            indexes_ready: Arc::new(AtomicBool::new(false)),
         };
         svc.ensure_indexes().await?;
         Ok(svc)
     }
 
     /// 모든 컬렉션에 unique 인덱스 생성. 멱등.
+    ///
+    /// # Errors
+    ///
+    /// MongoDB 인덱스 생성 실패 시 `mongodb::error::Error` 를 래핑해 반환.
     pub async fn ensure_indexes(&self) -> HDMealResult<()> {
-        {
-            let ready = self.indexes_ready.lock().unwrap();
-            if *ready {
-                return Ok(());
-            }
+        if self.indexes_ready.load(Ordering::Acquire) {
+            return Ok(());
         }
         let opts = IndexOptions::builder().unique(true).build();
         let idx_date = IndexModel::builder()
@@ -79,8 +80,7 @@ impl DataService {
             .await?;
         self.coll.users.create_index(idx_user).await?;
 
-        let mut ready = self.indexes_ready.lock().unwrap();
-        *ready = true;
+        self.indexes_ready.store(true, Ordering::Release);
         Ok(())
     }
 

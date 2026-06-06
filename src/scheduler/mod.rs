@@ -16,6 +16,8 @@ use tokio::task::JoinHandle;
 
 pub struct PeriodicTask {
     interval: Duration,
+    // `std::sync::Mutex` 가 안전한 이유: 락은 `JoinHandle` 의
+    // insert/take 에만 순간적으로 사용되고 `.await` 에서 잡지 않는다.
     state: Arc<Mutex<State>>,
     notify_stop: Arc<Notify>,
     stop_requested: Arc<AtomicBool>,

@@ -41,6 +41,9 @@ struct InflightEntry {
 pub struct IngestionService {
     data: Arc<DataService>,
     neis: Arc<NeisClient>,
+    // `std::sync::Mutex` 가 안전한 이유: 락은 오직 HashMap 조작(삽입/조회/삭제)
+    // 에만 잠시 유지되고, `.await` 포인트에서는 절대 잡고 있지 않다.
+    // `tokio::sync::Mutex` 로 교체하면 오버헤드만 증가한다.
     cooldown: Mutex<HashMap<String, Instant>>,
     inflight: Mutex<HashMap<String, Arc<InflightEntry>>>,
 }
@@ -152,6 +155,10 @@ impl IngestionService {
     }
 
     /// 주어진 (start, end) 구간의 데이터를 동기화.
+    ///
+    /// # Errors
+    ///
+    /// NEIS fetch 실패 시 `Err(String)` 반환. cooldown 내면 `Ok(Cooldown)`.
     pub async fn sync_range(&self, start: NaiveDate, end: NaiveDate) -> Result<SyncStatus, String> {
         let key = Self::key_range(start, end);
         if self.check_cooldown(&key) {

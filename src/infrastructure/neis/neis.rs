@@ -49,8 +49,8 @@ const TIMETABLE_PAGE_SIZE: u32 = 1000;
 /// NEIS 클라이언트.
 #[derive(Clone)]
 pub struct NeisClient {
-    pub config: AppConfig,
-    pub http: HttpClient,
+    config: AppConfig,
+    http: HttpClient,
 }
 
 impl NeisClient {
