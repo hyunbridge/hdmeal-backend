@@ -163,6 +163,8 @@ docker run --rm -p 8000:8000 --env-file .env hdmeal-backend
 
 - `OTEL_EXPORTER_OTLP_ENDPOINT`: gRPC endpoint (예: `http://otel-collector:4317`). 비우면 OTel 비활성.
 - `OTEL_SERVICE_NAME`: `service.name` resource attribute (기본 `APP_NAME`)
+- `OTEL_TRACES_SAMPLER`: `AlwaysOn`, `AlwaysOff`, `TraceIdRatioBased` 계열 샘플러 선택
+- `OTEL_TRACES_SAMPLER_ARG`: `TraceIdRatioBased` / `ParentBased(TraceIdRatioBased)` 에서 사용할 비율
 - `RUST_LOG`: `tracing-subscriber` EnvFilter. 기본 `info,hdmeal_backend=debug`
 
 ## 테스트
@@ -188,7 +190,7 @@ cargo run --release
 ### 전송 항목
 
 - **Span exporter**: OTLP/gRPC (tonic), 5초 타임아웃
-- **Sampler**: `AlwaysOn`
+- **Sampler**: 기본 `AlwaysOn`, `OTEL_TRACES_SAMPLER` / `OTEL_TRACES_SAMPLER_ARG` 로 조정 가능
 - **Resource attributes**: `service.name`, `service.version`
 - **Propagator**: W3C `TraceContext` (`traceparent` / `tracestate`) + `BaggagePropagator`
 - **Span source**: `tracing` 매크로 (`info!`, `warn!`, `error!`) 와 `tower_http::trace::TraceLayer`/custom middleware

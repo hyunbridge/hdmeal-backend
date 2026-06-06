@@ -14,6 +14,7 @@ use opentelemetry_sdk::propagation::TraceContextPropagator;
 use opentelemetry_sdk::trace::Sampler;
 use opentelemetry_sdk::trace::SdkTracerProvider;
 use opentelemetry_sdk::Resource;
+use std::env;
 use std::sync::OnceLock;
 use std::time::Duration;
 use tracing_subscriber::layer::SubscriberExt;
@@ -32,6 +33,9 @@ pub struct RequestContext {
 }
 
 /// OTel + tracing-subscriber 부트스트랩. 한 번만 호출.
+///
+/// `OTEL_TRACES_SAMPLER` / `OTEL_TRACES_SAMPLER_ARG` 가 설정되어 있으면
+/// sampler 를 조정할 수 있다. 기본값은 `AlwaysOn`.
 pub fn init(app_name: &str, otel_endpoint: Option<&str>) -> anyhow::Result<()> {
     let env_filter = EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| EnvFilter::new("info,hdmeal_backend=debug"));
@@ -53,10 +57,11 @@ pub fn init(app_name: &str, otel_endpoint: Option<&str>) -> anyhow::Result<()> {
             .with_endpoint(endpoint)
             .with_timeout(Duration::from_secs(5))
             .build()?;
+        let sampler = sampler_from_env()?;
 
         let provider = SdkTracerProvider::builder()
             .with_batch_exporter(exporter)
-            .with_sampler(Sampler::AlwaysOn)
+            .with_sampler(sampler)
             .with_resource(resource)
             .build();
 
@@ -80,6 +85,62 @@ pub fn init(app_name: &str, otel_endpoint: Option<&str>) -> anyhow::Result<()> {
     }
 
     Ok(())
+}
+
+fn sampler_from_env() -> anyhow::Result<Sampler> {
+    let sampler = env::var("OTEL_TRACES_SAMPLER").ok();
+    let arg = env::var("OTEL_TRACES_SAMPLER_ARG").ok();
+    sampler_from_value(sampler.as_deref(), arg.as_deref())
+}
+
+fn sampler_from_value(sampler: Option<&str>, arg: Option<&str>) -> anyhow::Result<Sampler> {
+    let Some(sampler) = sampler else {
+        return Ok(Sampler::AlwaysOn);
+    };
+    let sampler = sampler.trim();
+    if sampler.is_empty() {
+        return Ok(Sampler::AlwaysOn);
+    }
+
+    let sampler = match sampler.to_ascii_lowercase().as_str() {
+        "always_on" | "alwayson" => Sampler::AlwaysOn,
+        "always_off" | "alwaysoff" => Sampler::AlwaysOff,
+        "traceidratio" | "trace_id_ratio" | "ratio" => {
+            Sampler::TraceIdRatioBased(parse_sampler_ratio_value(arg)?)
+        }
+        "parentbased_always_on" | "parentbased_alwayson" => {
+            Sampler::ParentBased(Box::new(Sampler::AlwaysOn))
+        }
+        "parentbased_always_off" | "parentbased_alwaysoff" => {
+            Sampler::ParentBased(Box::new(Sampler::AlwaysOff))
+        }
+        "parentbased_traceidratio" | "parentbased_trace_id_ratio" | "parentbased_ratio" => {
+            Sampler::ParentBased(Box::new(Sampler::TraceIdRatioBased(
+                parse_sampler_ratio_value(arg)?,
+            )))
+        }
+        other => {
+            return Err(anyhow::anyhow!(
+                "OTEL_TRACES_SAMPLER 값이 올바르지 않습니다: {other}"
+            ));
+        }
+    };
+
+    Ok(sampler)
+}
+
+fn parse_sampler_ratio_value(raw: Option<&str>) -> anyhow::Result<f64> {
+    let raw = raw.ok_or_else(|| anyhow::anyhow!("OTEL_TRACES_SAMPLER_ARG 가 필요합니다."))?;
+    let ratio: f64 = raw
+        .trim()
+        .parse()
+        .map_err(|_| anyhow::anyhow!("OTEL_TRACES_SAMPLER_ARG 값이 올바르지 않습니다: {raw}"))?;
+    if !(0.0..=1.0).contains(&ratio) {
+        return Err(anyhow::anyhow!(
+            "OTEL_TRACES_SAMPLER_ARG 값은 0.0 이상 1.0 이하이어야 합니다: {ratio}"
+        ));
+    }
+    Ok(ratio)
 }
 
 /// Shutdown 시 exporter flush.
@@ -160,5 +221,30 @@ where
                 parent_cx,
             })
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sampler_defaults_to_always_on() {
+        let sampler = sampler_from_value(None, None).unwrap();
+        assert!(matches!(sampler, Sampler::AlwaysOn));
+    }
+
+    #[test]
+    fn sampler_parses_trace_id_ratio() {
+        let sampler = sampler_from_value(Some("traceidratio"), Some("0.25")).unwrap();
+        assert!(
+            matches!(sampler, Sampler::TraceIdRatioBased(v) if (v - 0.25).abs() < f64::EPSILON)
+        );
+    }
+
+    #[test]
+    fn sampler_rejects_invalid_ratio() {
+        let err = sampler_from_value(Some("traceidratio"), Some("1.25")).unwrap_err();
+        assert!(err.to_string().contains("0.0 이상 1.0 이하"));
     }
 }
