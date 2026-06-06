@@ -51,7 +51,7 @@ async fn days(
     let start_str = start.format("%Y-%m-%d").to_string();
     let end_str = end.format("%Y-%m-%d").to_string();
 
-    let sync_ready = ctx.ingestion.try_sync_range_short(start, end).await;
+    let sync_status = ctx.ingestion.ensure_range(start, end);
 
     let (meals, schedules, timetables) = tokio::join!(
         ctx.data.get_meals_in_range(&start_str, &end_str),
@@ -113,7 +113,7 @@ async fn days(
     if let Ok(v) = HeaderValue::from_str(&format!("{start_str}~{end_str}")) {
         resp.headers_mut().insert("X-HDMeal-Range", v);
     }
-    if let Ok(v) = HeaderValue::from_str(sync_status_label(sync_ready)) {
+    if let Ok(v) = HeaderValue::from_str(sync_status.sync_header_label()) {
         resp.headers_mut().insert("X-HDMeal-Sync", v);
     }
     Ok(resp)
@@ -127,7 +127,7 @@ async fn day(
     let ctx = state.ctx;
     let d = parse_date_param(&day, "day").map_err(HDMealError::bad_request)?;
     let d_str = d.format("%Y-%m-%d").to_string();
-    let sync_ready = ctx.ingestion.try_sync_range_short(d, d).await;
+    let sync_status = ctx.ingestion.ensure_range(d, d);
     let (meal, schedule, timetable) = tokio::join!(
         ctx.data.get_meal_by_date(&d_str),
         ctx.data.get_schedule_by_date(&d_str),
@@ -158,18 +158,10 @@ async fn day(
     if let Ok(v) = HeaderValue::from_str(&format!("{d_str}~{d_str}")) {
         resp.headers_mut().insert("X-HDMeal-Range", v);
     }
-    if let Ok(v) = HeaderValue::from_str(sync_status_label(sync_ready)) {
+    if let Ok(v) = HeaderValue::from_str(sync_status.sync_header_label()) {
         resp.headers_mut().insert("X-HDMeal-Sync", v);
     }
     Ok(resp)
-}
-
-fn sync_status_label(sync_ready: bool) -> &'static str {
-    if sync_ready {
-        "fresh"
-    } else {
-        "pending"
-    }
 }
 
 async fn meta(
