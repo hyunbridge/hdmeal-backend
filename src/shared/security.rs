@@ -8,17 +8,49 @@
 use chrono::{Duration, Utc};
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq;
 
 use crate::error::{HDMealError, HDMealResult};
 
 /// `/skill/` 인증 토큰. 상수 시간 비교로 안전하게 검증한다.
-pub fn authorize_skill_token(provided: Option<&str>, allowed: &[String]) -> bool {
+///
+/// 비교는 SHA-256 digest 로 고정 길이화한 뒤 진행한다. `iter().any`
+/// 같은 조기 반환 경로를 없애고, allowed 목록의 모든 항목을 끝까지 확인한다.
+pub(crate) fn hash_skill_token(token: &str) -> [u8; 32] {
+    let digest = Sha256::digest(token.as_bytes());
+    let mut out = [0u8; 32];
+    out.copy_from_slice(digest.as_ref());
+    out
+}
+
+/// 이미 해시된 `/skill/` 토큰 목록과 상수 시간 비교.
+pub(crate) fn authorize_skill_token_hashed(
+    provided: Option<&str>,
+    allowed_hashes: &[[u8; 32]],
+) -> bool {
     let Some(provided) = provided else {
         return false;
     };
-    let p = provided.as_bytes();
-    allowed.iter().any(|a| a.as_bytes().ct_eq(p).into())
+    let provided_hash = Sha256::digest(provided.as_bytes());
+    let provided_hash: &[u8] = provided_hash.as_ref();
+    let mut any_match = 0u8;
+    for allowed_hash in allowed_hashes {
+        let allowed_hash: &[u8] = allowed_hash.as_ref();
+        any_match |= provided_hash.ct_eq(allowed_hash).unwrap_u8();
+    }
+    any_match != 0
+}
+
+/// `/skill/` 인증 토큰. 상수 시간 비교로 안전하게 검증한다.
+///
+/// 테스트/호출 편의용 raw-string 경로. production 은 pre-hash 경로를 사용한다.
+pub fn authorize_skill_token(provided: Option<&str>, allowed: &[String]) -> bool {
+    let allowed_hashes: Vec<[u8; 32]> = allowed
+        .iter()
+        .map(|token| hash_skill_token(token))
+        .collect();
+    authorize_skill_token_hashed(provided, &allowed_hashes)
 }
 
 /// user-settings JWT 발급자. issuer = `"HDMeal-UserSettings"`, TTL 10분.
@@ -57,6 +89,11 @@ pub struct IssueUserTokenInput<'a> {
 }
 
 /// 10분짜리 user-settings JWT 를 발급합니다.
+///
+/// # Errors
+///
+/// - `HDMealError::Internal` — `secret` 가 빈 문자열인 경우.
+/// - `jsonwebtoken::Error` — 인코딩 실패 (극히 드묾).
 pub fn issue_user_token(input: IssueUserTokenInput<'_>) -> HDMealResult<String> {
     if input.secret.is_empty() {
         return Err(HDMealError::internal("JWT secret is empty"));
@@ -90,10 +127,17 @@ pub struct ValidateUserTokenInput<'a> {
 }
 
 /// JWT 를 검증하고 클레임을 반환합니다.
+///
+/// # Errors
+///
+/// - `HDMealError::Forbidden` — 서명 불일치, 만료, `sub != uid`, scope 부족.
 pub fn validate_user_token(input: ValidateUserTokenInput<'_>) -> HDMealResult<UserTokenClaims> {
     let mut validation = Validation::new(Algorithm::HS256);
     validation.set_issuer(&[JWT_ISSUER]);
     validation.set_required_spec_claims(&["iss", "uid", "scope", "reqId", "nbf", "exp"]);
+    validation.validate_nbf = true;
+    // 분산 환경에서 클럭 스큐를 수용하기 위해 30초 leeway 허용.
+    validation.leeway = 30;
     let data = decode::<UserTokenClaims>(
         input.token,
         &DecodingKey::from_secret(input.secret.as_bytes()),
@@ -124,6 +168,7 @@ pub fn split_uid(uid: &str) -> HDMealResult<(&str, &str)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 
     #[test]
     fn skill_token_constant_time() {
@@ -193,6 +238,66 @@ mod tests {
         let err = validate_user_token(ValidateUserTokenInput {
             token: &token,
             secret: "secret-2",
+            required_scope: scope::GET_USER_INFO,
+        })
+        .unwrap_err();
+        assert_eq!(err.status(), axum::http::StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn jwt_accepts_nbf_within_leeway() {
+        let secret = "test-secret";
+        let now = Utc::now().timestamp();
+        let claims = UserTokenClaims {
+            iss: JWT_ISSUER.to_string(),
+            sub: "KT:abc".to_string(),
+            jti: crate::shared::context::new_request_id(),
+            iat: now,
+            nbf: now + 20,
+            exp: now + 600,
+            uid: "KT:abc".to_string(),
+            scope: vec![scope::GET_USER_INFO.to_string()],
+            req_id: crate::shared::context::new_request_id(),
+        };
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(secret.as_bytes()),
+        )
+        .unwrap();
+        let validated = validate_user_token(ValidateUserTokenInput {
+            token: &token,
+            secret,
+            required_scope: scope::GET_USER_INFO,
+        })
+        .unwrap();
+        assert_eq!(validated.uid, "KT:abc");
+    }
+
+    #[test]
+    fn jwt_rejects_nbf_beyond_leeway() {
+        let secret = "test-secret";
+        let now = Utc::now().timestamp();
+        let claims = UserTokenClaims {
+            iss: JWT_ISSUER.to_string(),
+            sub: "KT:abc".to_string(),
+            jti: crate::shared::context::new_request_id(),
+            iat: now,
+            nbf: now + 40,
+            exp: now + 600,
+            uid: "KT:abc".to_string(),
+            scope: vec![scope::GET_USER_INFO.to_string()],
+            req_id: crate::shared::context::new_request_id(),
+        };
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(secret.as_bytes()),
+        )
+        .unwrap();
+        let err = validate_user_token(ValidateUserTokenInput {
+            token: &token,
+            secret,
             required_scope: scope::GET_USER_INFO,
         })
         .unwrap_err();
