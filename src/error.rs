@@ -83,8 +83,7 @@ impl HDMealError {
         use axum::http::StatusCode;
         match self {
             Self::BadRequest(_) | Self::Json(_) => StatusCode::BAD_REQUEST,
-            Self::Unauthorized(_) => StatusCode::UNAUTHORIZED,
-            Self::Jwt(_) => StatusCode::FORBIDDEN,
+            Self::Unauthorized(_) | Self::Jwt(_) => StatusCode::UNAUTHORIZED,
             Self::Forbidden(_) => StatusCode::FORBIDDEN,
             Self::NotFound(_) => StatusCode::NOT_FOUND,
             Self::ServiceUnavailable(_) | Self::Http(_) => StatusCode::SERVICE_UNAVAILABLE,
@@ -98,7 +97,7 @@ impl HDMealError {
     pub fn public_message(&self) -> String {
         match self {
             Self::BadRequest(m) => m.clone(),
-            Self::Json(e) => format!("잘못된 요청 본문입니다: {e}"),
+            Self::Json(_) => "잘못된 요청 본문입니다.".to_string(),
             Self::Unauthorized(m) => m.clone(),
             Self::Jwt(_) => "올바르지 않은 토큰입니다.".to_string(),
             Self::Forbidden(m) => m.clone(),
@@ -120,7 +119,6 @@ pub struct ErrorEnvelope {
 
 impl axum::response::IntoResponse for HDMealError {
     fn into_response(self) -> axum::response::Response {
-        use axum::http::StatusCode;
         use axum::Json;
 
         let status = self.status();
@@ -130,8 +128,7 @@ impl axum::response::IntoResponse for HDMealError {
             detail: self.public_message(),
             request_id: request_id.clone(),
         };
-        let mut resp = (StatusCode::OK, Json(body)).into_response();
-        *resp.status_mut() = status;
+        let mut resp = (status, Json(body)).into_response();
         // 보안 헤더는 `security_headers_layer()` 가 정상 응답에 부착하지만,
         // 에러 응답은 라우트 매칭 전(fallback_404)이나 핸들러 내에서
         // 직접 반환될 수 있어 개별 부착이 필요하다.

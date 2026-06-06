@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use chrono::{DateTime, NaiveDate};
+use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 
 use crate::domain::{MealDocument, ScheduleDocument, TimetableDocument};
@@ -89,7 +89,8 @@ pub struct MetaResponse {
 pub struct MetaData {
     pub version: String,
     pub build: u32,
-    pub debug: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub debug: Option<bool>,
 }
 
 // ---------- /cache/healthcheck ----------
@@ -108,10 +109,6 @@ pub enum CacheHealthStatus {
     Expired,
     NotFound,
 }
-
-// ---------- /skill/ ----------
-
-pub use crate::application::chatbot::types::KakaoSkillResponse as SkillResponse;
 
 // ---------- Converters ----------
 
@@ -168,10 +165,6 @@ pub fn parse_optional_date_param(s: Option<&str>) -> Result<Option<NaiveDate>, S
             .map(Some)
             .map_err(|_| "잘못된 날짜 형식입니다. (YYYY-MM-DD)".to_string()),
     }
-}
-
-pub fn parse_updated_at(dt: &DateTime<chrono::Utc>) -> String {
-    crate::shared::timezone::to_kst_iso(dt)
 }
 
 #[cfg(test)]

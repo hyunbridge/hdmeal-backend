@@ -78,7 +78,7 @@ fn jwt_expired_is_rejected() {
         required_scope: scope::GET_USER_INFO,
     })
     .unwrap_err();
-    assert_eq!(err.status(), axum::http::StatusCode::FORBIDDEN);
+    assert_eq!(err.status(), axum::http::StatusCode::UNAUTHORIZED);
 }
 
 #[test]

@@ -168,7 +168,7 @@ async fn meta(
         data: MetaData {
             version: ctx.config.app_version.clone(),
             build: ctx.config.app_build,
-            debug: ctx.config.debug,
+            debug: cfg!(debug_assertions).then_some(ctx.config.debug),
         },
     };
     let resp = (StatusCode::OK, Json(body)).into_response();

@@ -104,6 +104,7 @@ fn escape_label(s: &str) -> String {
         match ch {
             '\\' => out.push_str("\\\\"),
             '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
             _ => out.push(ch),
         }
     }
@@ -177,6 +178,7 @@ mod tests {
         assert!(r.contains(r#"method="G\\E\"T""#));
         assert_eq!(escape_label(r#"x"y"#), r#"x\"y"#);
         assert_eq!(escape_label(r#"x\y"#), r#"x\\y"#);
+        assert_eq!(escape_label("x\ny"), r#"x\ny"#);
     }
 
     #[test]

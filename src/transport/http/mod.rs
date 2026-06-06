@@ -285,7 +285,7 @@ pub mod handlers {
                 tracing::warn!(error = %e, "/readyz mongo ping failed");
                 let body = json!({
                     "status": "not_ready",
-                    "checks": {"mongo": format!("error: {e}")},
+                    "checks": {"mongo": "error"},
                 });
                 (StatusCode::SERVICE_UNAVAILABLE, Json(body)).into_response()
             }
