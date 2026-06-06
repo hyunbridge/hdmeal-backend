@@ -20,7 +20,7 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: 1.83
+          toolchain: 1.88
 
       - name: Cache cargo registry & target
         uses: Swatinem/rust-cache@v2
@@ -37,7 +37,7 @@ jobs:
         run: cargo build --locked --all-targets
 
       - name: Test
-        run: cargo test --locked -- --test-threads=1 --skip periodic_task
+        run: cargo test --locked -- --test-threads=1
 
   audit:
     name: Security audit
