@@ -17,7 +17,7 @@ use super::dto::api::{parse_date_param, parse_optional_date_param};
 pub fn router() -> Router<RouterState> {
     Router::new()
         .route("/api/app/days", get(days))
-        .route("/api/app/days/:day", get(day))
+        .route("/api/app/days/{day}", get(day))
         .route("/api/app/meta", get(meta))
 }
 
