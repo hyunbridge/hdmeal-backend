@@ -5,9 +5,9 @@
 ## 기능
 
 - 모바일 앱용 통합 데이터 API(급식/학사일정/시간표): `/api/app/*`
-- 카카오 i 오픈빌더 Skill 엔드포인트: `/skill/`
-- 사용자 설정(학년/반, 알레르기 표기 등): `/user/settings/`
-- 캐시 상태 점검: `/cache/healthcheck/`
+- 카카오 i 오픈빌더 Skill 엔드포인트: `/skill`
+- 사용자 설정(학년/반, 알레르기 표기 등): `/user/settings`
+- 캐시 상태 점검: `/cache/healthcheck`
 - 운영 프로브(k8s liveness/readiness) 및 Prometheus 메트릭: `/livez`, `/readyz`, `/metrics`
 - 주기적 데이터 동기화(NEIS + 보조 API, singleflight + 10분 쿨다운) 및 MongoDB 캐싱
 
@@ -42,7 +42,7 @@ hdmeal-backend/
 │   ├── infrastructure/
 │   │   └── neis/               # NEIS / KMA / Seoul Open Data
 │   ├── scheduler/              # 3h 주기 periodic task
-│   ├── shared/                 # base58, JWT, UUIDv7, KST, observability
+│   ├── shared/                 # JWT, UUIDv7, KST, metrics, observability
 │   ├── transport/http/         # Axum Router + handler
 │   └── error.rs                # HDMealError + Axum IntoResponse 변환
 └── tests/                      # 통합/단위 테스트
@@ -58,7 +58,7 @@ hdmeal-backend/
 
 - `X-Request-ID`: 요청 추적용 표준 헤더(서버는 기존 `X-HDMeal-Req-ID`도 호환 입력으로 수용)
 - `traceparent` / `tracestate`: OpenTelemetry W3C Trace Context 전파
-- `X-HDMeal-Token`: 카카오 스킬 호출 인증(서버가 보유한 `HDMeal_AuthTokens`와 비교). `?token=` / `Authorization: Bearer …` 형식도 지원.
+- `X-HDMeal-Token`: 카카오 스킬 호출 인증(서버가 보유한 `HDMeal_AuthTokens`와 비교). `Authorization: Bearer …` 형식도 지원하며, `?token=`은 `DEBUG=true`에서만 허용합니다.
 - 사용자 설정 API: `X-HDMeal-Token`에 JWT를 사용하며 scope 기반으로 권한을 검사합니다.
 - 요청 추적 ID는 UUIDv7 형식으로 생성됩니다.
 
@@ -73,11 +73,11 @@ hdmeal-backend/
 | GET | `/api/app/days?from=YYYY-MM-DD&to=YYYY-MM-DD` | – |
 | GET | `/api/app/days/{YYYY-MM-DD}` | – |
 | GET | `/api/app/meta` | – |
-| POST | `/skill/` | `X-HDMeal-Token` (또는 `?token=` / `Authorization: Bearer …`) |
-| GET | `/user/settings/` | JWT (`GetUserInfo`) |
-| PATCH | `/user/settings/` | JWT (`ManageUserInfo`) |
-| DELETE | `/user/settings/` | JWT (`ManageUserInfo`) |
-| GET | `/cache/healthcheck/` | – |
+| POST | `/skill` | `X-HDMeal-Token` (또는 debug 모드의 `?token=` / `Authorization: Bearer …`) |
+| GET | `/user/settings` | JWT (`GetUserInfo`) |
+| PATCH | `/user/settings` | JWT (`ManageUserInfo`) |
+| DELETE | `/user/settings` | JWT (`ManageUserInfo`) |
+| GET | `/cache/healthcheck` | – |
 
 ### 응답 헤더
 
@@ -146,7 +146,7 @@ docker run --rm -p 8000:8000 --env-file .env hdmeal-backend
 - `HDMeal_JWTSecret`: 사용자 설정 JWT 서명 키
 - `HDMeal_SeoulData_Token`: 서울 열린데이터(한강 수온) API 키
 - `HDMeal_KMA_ApiKey`: KMA 동네예보 API 키 (URL Encode되지 않은 값)
-- `HDMeal_KMA_NX`, `HDMeal_KMA_NY`: KMA 동네예보 격자 좌표 (기본 62, 120)
+- `HDMeal_KMA_NX`, `HDMeal_KMA_NY`: KMA 동네예보 격자 좌표 (기본 60, 127)
 - `HDMeal_BaseURL`: 사용자 설정 웹 베이스 URL (카드 링크/Allowed Origins 계산에 사용)
 
 ### 선택(런타임)
