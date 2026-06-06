@@ -5,7 +5,7 @@
 //! - `process_start_time_seconds` 게이지
 //!
 //! 의도적으로 OTel metrics SDK 를 도입하지 않고 [`prometheus` 크레이트도
-//! 쓰지 않습니다 — 현재 코드 베이스의 모든 카운터는 단순한 hashmap +
+//! 쓰지 않습니다 — 현재 코드 베이스의 모든 카운터는 concurrent map +
 //! atomic 으로 충분합니다. 분산 트레이싱은 이미 OTel Tracer 로 커버됩니다.
 //! 추후 라벨 카디널리티 / 히스토그램이 필요해지면 `prometheus` 크레이트로
 //! 교체하는 게 가장 적은 비용입니다.
@@ -15,16 +15,16 @@ use std::fmt::Write as _;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use std::sync::Mutex;
+use dashmap::DashMap;
 
-/// 프로세스 시작 시각 (epoch seconds). 게이지 한 줄로 노출.
 pub struct Metrics {
     start_time_secs: AtomicU64,
-    /// (path, method, status) -> count. 정렬된 직렬화를 위해 BTreeMap.
-    requests: Mutex<BTreeMap<RequestKey, u64>>,
+    /// 핫 패스는 concurrent map + atomic counter 로 처리하고,
+    /// `render()` 에서만 정렬된 snapshot 을 만든다.
+    requests: DashMap<RequestKey, AtomicU64>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct RequestKey {
     path: String,
     method: String,
@@ -39,22 +39,22 @@ impl Metrics {
             .unwrap_or(0);
         Self {
             start_time_secs: AtomicU64::new(start),
-            requests: Mutex::new(BTreeMap::new()),
+            requests: DashMap::new(),
         }
     }
 
     /// HTTP 요청 1 건을 카운트.
     pub fn record_request(&self, path: &str, method: &str, status: u16) {
         let path = normalize_path(path);
-        let mut map = self.requests.lock().unwrap();
-        let entry = map
-            .entry(RequestKey {
-                path,
-                method: method.to_owned(),
-                status,
-            })
-            .or_insert(0);
-        *entry += 1;
+        let key = RequestKey {
+            path,
+            method: method.to_owned(),
+            status,
+        };
+        self.requests
+            .entry(key)
+            .or_insert_with(|| AtomicU64::new(0))
+            .fetch_add(1, Ordering::Relaxed);
     }
 
     /// Prometheus text format 직렬화.
@@ -63,8 +63,12 @@ impl Metrics {
         out.push_str("# HELP http_requests_total Total HTTP requests by path, method, status.\n");
         out.push_str("# TYPE http_requests_total counter\n");
 
-        let map = self.requests.lock().unwrap();
-        for (key, count) in map.iter() {
+        let snapshot: BTreeMap<RequestKey, u64> = self
+            .requests
+            .iter()
+            .map(|entry| (entry.key().clone(), entry.value().load(Ordering::Relaxed)))
+            .collect();
+        for (key, count) in snapshot {
             let _ = writeln!(
                 out,
                 "http_requests_total{{path=\"{}\",method=\"{}\",status=\"{}\"}} {}",
@@ -74,7 +78,6 @@ impl Metrics {
                 count,
             );
         }
-        drop(map);
 
         out.push_str(
             "# HELP process_start_time_seconds Unix epoch seconds when the process started.\n",
@@ -189,5 +192,29 @@ mod tests {
             "/__unknown__"
         );
         assert_eq!(normalize_path("/some/other/path"), "/__unknown__");
+    }
+
+    #[test]
+    fn concurrent_recording_is_cumulative() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let metrics = Arc::new(Metrics::new());
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            let metrics = Arc::clone(&metrics);
+            handles.push(thread::spawn(move || {
+                for _ in 0..1_000 {
+                    metrics.record_request("/healthz", "GET", 200);
+                }
+            }));
+        }
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let rendered = metrics.render();
+        assert!(rendered
+            .contains("http_requests_total{path=\"/healthz\",method=\"GET\",status=\"200\"} 8000"));
     }
 }
