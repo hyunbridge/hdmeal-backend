@@ -75,6 +75,7 @@ opentelemetry = { version = "0.32", default-features = false, features = ["trace
 opentelemetry_sdk = { version = "0.32", default-features = false, features = ["trace"] }
 opentelemetry-otlp = { version = "0.32", default-features = false, features = ["grpc-tonic", "trace"] }
 dotenvy = "0.15"
+dashmap = "6"
 # regex: 패턴이 모두 ASCII-only 이지만 `\d` 가 unicode-perl 클래스에 의존.
 # unicode-age / unicode-script / unicode-segment / unicode-bool / unicode-case / unicode-gencat
 # (CJK / 이모지 / 케이스 폴딩 테이블) 는 제외 → 수백 KB 절감.
@@ -87,6 +88,7 @@ rand = "0.10"
 futures-util = "0.3"
 url = "2"
 subtle = "2"
+sha2 = "0.10"
 
 # 테스트 / 벤치 / 예제 빌드 시에만 활성화되는 추가 feature.
 # release 빌드에는 포함되지 않으므로, 런타임 바이너리 크기에 영향 없음.
