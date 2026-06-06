@@ -17,7 +17,7 @@ use std::sync::LazyLock;
 
 use chrono::NaiveDate;
 use regex::Regex;
-use serde::Deserialize;
+use serde::{Deserialize, Deserializer};
 
 use super::http_client::HttpClient;
 use crate::config::AppConfig;
@@ -83,6 +83,7 @@ impl NeisClient {
             return Ok(Vec::new());
         };
         let rows = info
+            .row
             .get("row")
             .and_then(|r| r.as_array())
             .cloned()
@@ -125,6 +126,7 @@ impl NeisClient {
             return Ok(Vec::new());
         };
         let rows = info
+            .row
             .get("row")
             .and_then(|r| r.as_array())
             .cloned()
@@ -201,6 +203,7 @@ impl NeisClient {
 
     /// 페이지네이션된 시간표를 병렬로 가져와 merge.
     pub async fn fetch_timetables(&self, date: NaiveDate) -> HDMealResult<Vec<TimetableDocument>> {
+        let date_str = date.format("%Y-%m-%d").to_string();
         // 1) 첫 페이지로 총 개수 파악.
         let mut first_params = self.common_params();
         first_params.push(("ALL_TI_YMD", date.format("%Y%m%d").to_string()));
@@ -209,11 +212,11 @@ impl NeisClient {
         let url = format!("{NEIS_BASE}/hisTimetable");
         let first: serde_json::Value = self.http.get_json_with_params(&url, &first_params).await?;
         let Some(info) = extract_service(&first, "hisTimetable")? else {
-            return Ok(Vec::new());
+            return Ok(vec![empty_timetable_document(&date_str)]);
         };
-        let total = extract_list_total(info);
+        let total = extract_list_total(info.head);
         if total == 0 {
-            return Ok(Vec::new());
+            return Ok(vec![empty_timetable_document(&date_str)]);
         }
         let total_pages = total.div_ceil(TIMETABLE_PAGE_SIZE);
 
@@ -230,6 +233,7 @@ impl NeisClient {
                 let raw: serde_json::Value = http.get_json_with_params(&url, &p_params).await?;
                 let rows = match extract_service(&raw, "hisTimetable")? {
                     Some(info) => info
+                        .row
                         .get("row")
                         .and_then(|r| r.as_array())
                         .cloned()
@@ -242,6 +246,7 @@ impl NeisClient {
 
         // 3) 첫 페이지 + 나머지 merge.
         let mut all_rows: Vec<serde_json::Value> = info
+            .row
             .get("row")
             .and_then(|r| r.as_array())
             .cloned()
@@ -255,10 +260,15 @@ impl NeisClient {
         }
 
         // 4) row → lessons
-        let date_str = date.format("%Y-%m-%d").to_string();
         let mut lessons: BTreeMap<String, BTreeMap<String, Vec<String>>> = BTreeMap::new();
         for row in all_rows {
-            let row: TimetableRow = serde_json::from_value(row)?;
+            let row: TimetableRow = match serde_json::from_value(row) {
+                Ok(row) => row,
+                Err(e) => {
+                    tracing::warn!(error = %e, date = %date_str, "skipping malformed timetable row");
+                    continue;
+                }
+            };
             if row.ITRT_CNTNT == "토요휴업일" {
                 continue;
             }
@@ -358,42 +368,65 @@ struct NeisResultInfo {
     message: String,
 }
 
-/// raw JSON envelope 에서 serviceName 의 head / row 추출 + RESULT.INFO-000 검증.
+#[derive(Debug, Clone, Copy)]
+struct NeisServiceInfo<'a> {
+    head: &'a serde_json::Value,
+    row: &'a serde_json::Value,
+}
+
+/// raw JSON envelope 에서 serviceName 의 `head` / `row` 를 추출하고
+/// `RESULT.INFO-000` 을 검증한다.
+///
 /// NEIS 는 무데이터를 root `RESULT.INFO-200` 으로 반환하므로 `Ok(None)` 으로 표현한다.
 fn extract_service<'a>(
     v: &'a serde_json::Value,
     key: &str,
-) -> HDMealResult<Option<&'a serde_json::Value>> {
-    let Some(info) = v
-        .get(key)
-        .and_then(|x| x.as_array())
-        .and_then(|arr| arr.first())
-    else {
+) -> HDMealResult<Option<NeisServiceInfo<'a>>> {
+    let Some(items) = v.get(key).and_then(|x| x.as_array()) else {
         if is_no_data_result(v) {
             return Ok(None);
         }
         return Err(HDMealError::not_found(format!("missing NEIS key {key}")));
     };
-    if let Some(head_items) = info.get("head").and_then(|h| h.as_array()) {
-        for head in head_items {
-            let Some(r) = head.get("RESULT") else {
-                continue;
-            };
-            let code = neis_result_field(r, "code", "CODE").unwrap_or("");
-            if code == "INFO-200" {
-                return Ok(None);
-            }
-            if code != "INFO-000" {
-                let msg = r
-                    .get("message")
-                    .or_else(|| r.get("MESSAGE"))
-                    .and_then(|m| m.as_str())
-                    .unwrap_or("NEIS error");
-                return Err(HDMealError::service_unavailable(format!("NEIS: {msg}")));
+
+    let mut head: Option<&serde_json::Value> = None;
+    let mut row: Option<&serde_json::Value> = None;
+    for item in items {
+        if head.is_none() && item.get("head").and_then(|h| h.as_array()).is_some() {
+            head = Some(item);
+        }
+        if row.is_none() && item.get("row").and_then(|r| r.as_array()).is_some() {
+            row = Some(item);
+        }
+
+        if let Some(head_items) = item.get("head").and_then(|h| h.as_array()) {
+            for head_item in head_items {
+                let Some(r) = head_item.get("RESULT") else {
+                    continue;
+                };
+                let code = neis_result_field(r, "code", "CODE").unwrap_or("");
+                if code == "INFO-200" {
+                    return Ok(None);
+                }
+                if code != "INFO-000" {
+                    let msg = r
+                        .get("message")
+                        .or_else(|| r.get("MESSAGE"))
+                        .and_then(|m| m.as_str())
+                        .unwrap_or("NEIS error");
+                    return Err(HDMealError::service_unavailable(format!("NEIS: {msg}")));
+                }
             }
         }
     }
-    Ok(Some(info))
+
+    match (head, row) {
+        (Some(head), Some(row)) => Ok(Some(NeisServiceInfo { head, row })),
+        _ if is_no_data_result(v) => Ok(None),
+        _ => Err(HDMealError::not_found(format!(
+            "missing NEIS head/row for {key}"
+        ))),
+    }
 }
 
 fn is_no_data_result(v: &serde_json::Value) -> bool {
@@ -465,11 +498,11 @@ struct ScheduleRow {
 #[serde(rename_all = "UPPERCASE")]
 #[allow(non_snake_case)]
 struct TimetableRow {
-    #[serde(rename = "GRADE")]
+    #[serde(rename = "GRADE", deserialize_with = "deserialize_loose_u32")]
     GRADE: u32,
-    #[serde(rename = "CLASS_NM")]
+    #[serde(rename = "CLASS_NM", deserialize_with = "deserialize_loose_u32")]
     CLASS_NM: u32,
-    #[serde(rename = "PERIO")]
+    #[serde(rename = "PERIO", deserialize_with = "deserialize_loose_usize")]
     PERIO: usize,
     #[serde(rename = "ITRT_CNTNT")]
     ITRT_CNTNT: String,
@@ -488,6 +521,57 @@ fn date_range(start: NaiveDate, end: NaiveDate) -> Vec<NaiveDate> {
         d = next;
     }
     out
+}
+
+fn empty_timetable_document(date_str: &str) -> TimetableDocument {
+    TimetableDocument {
+        id: date_str.to_string(),
+        date: date_str.to_string(),
+        lessons: BTreeMap::new(),
+        created_at: chrono::Utc::now(),
+    }
+}
+
+fn deserialize_loose_u32<'de, D>(d: D) -> Result<u32, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use serde::de::Error;
+    let v = serde_json::Value::deserialize(d)?;
+    match v {
+        serde_json::Value::Number(n) => n
+            .as_u64()
+            .and_then(|x| u32::try_from(x).ok())
+            .ok_or_else(|| D::Error::custom("invalid u32")),
+        serde_json::Value::String(s) => {
+            let digits: String = s.chars().filter(|c| c.is_ascii_digit()).collect();
+            digits
+                .parse::<u32>()
+                .map_err(|_| D::Error::custom(format!("invalid u32: {s}")))
+        }
+        _ => Err(D::Error::custom("expected number or string")),
+    }
+}
+
+fn deserialize_loose_usize<'de, D>(d: D) -> Result<usize, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    use serde::de::Error;
+    let v = serde_json::Value::deserialize(d)?;
+    match v {
+        serde_json::Value::Number(n) => n
+            .as_u64()
+            .and_then(|x| usize::try_from(x).ok())
+            .ok_or_else(|| D::Error::custom("invalid usize")),
+        serde_json::Value::String(s) => {
+            let digits: String = s.chars().filter(|c| c.is_ascii_digit()).collect();
+            digits
+                .parse::<usize>()
+                .map_err(|_| D::Error::custom(format!("invalid usize: {s}")))
+        }
+        _ => Err(D::Error::custom("expected number or string")),
+    }
 }
 
 fn parse_neis_ymd(s: &str) -> Option<String> {
@@ -579,6 +663,21 @@ mod tests {
     }
 
     #[test]
+    fn timetable_row_accepts_string_numbers() {
+        let raw = serde_json::json!({
+            "GRADE": "1",
+            "CLASS_NM": "2",
+            "PERIO": "3",
+            "ITRT_CNTNT": "국어"
+        });
+        let row: TimetableRow = serde_json::from_value(raw).unwrap();
+        assert_eq!(row.GRADE, 1);
+        assert_eq!(row.CLASS_NM, 2);
+        assert_eq!(row.PERIO, 3);
+        assert_eq!(row.ITRT_CNTNT, "국어");
+    }
+
+    #[test]
     fn extract_service_treats_root_info_200_as_no_data() {
         let raw = serde_json::json!({
             "RESULT": {
@@ -606,6 +705,45 @@ mod tests {
         });
 
         assert!(extract_service(&raw, "hisTimetable").unwrap().is_none());
+    }
+
+    #[test]
+    fn extract_service_returns_both_head_and_row() {
+        let raw = serde_json::json!({
+            "hisTimetable": [
+                {
+                    "head": [
+                        {"list_total_count": 2},
+                        {
+                            "RESULT": {
+                                "CODE": "INFO-000",
+                                "MESSAGE": "정상 처리되었습니다."
+                            }
+                        }
+                    ]
+                },
+                {
+                    "row": [
+                        {
+                            "GRADE": "1",
+                            "CLASS_NM": "1",
+                            "PERIO": "1",
+                            "ITRT_CNTNT": "국어"
+                        }
+                    ]
+                }
+            ]
+        });
+
+        let info = extract_service(&raw, "hisTimetable").unwrap().unwrap();
+        assert_eq!(extract_list_total(info.head), 2);
+        assert_eq!(
+            info.row
+                .get("row")
+                .and_then(|r| r.as_array())
+                .map(|r| r.len()),
+            Some(1)
+        );
     }
 
     #[test]
