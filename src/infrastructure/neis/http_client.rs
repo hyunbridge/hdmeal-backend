@@ -7,6 +7,7 @@
 
 use std::time::Duration;
 
+use chrono::{DateTime, Utc};
 use rand::RngExt;
 use reqwest::header::{HeaderMap, RETRY_AFTER};
 use reqwest::{Client, Response, StatusCode, Url};
@@ -16,6 +17,7 @@ use crate::error::{HDMealError, HDMealResult};
 use crate::shared::tls;
 
 const DEFAULT_BASE_DELAY_MS: u64 = 500;
+const DEFAULT_MAX_DELAY_MS: u64 = 30_000;
 const DEFAULT_MAX_RETRIES: u32 = 2;
 const DEFAULT_RETRY_STATUSES: &[u16] = &[429, 500, 502, 503, 504];
 
@@ -24,6 +26,7 @@ const DEFAULT_RETRY_STATUSES: &[u16] = &[429, 500, 502, 503, 504];
 pub struct RetryPolicy {
     pub max_retries: u32,
     pub base_delay: Duration,
+    pub max_delay: Duration,
     pub retry_statuses: Vec<StatusCode>,
 }
 
@@ -32,6 +35,7 @@ impl Default for RetryPolicy {
         Self {
             max_retries: DEFAULT_MAX_RETRIES,
             base_delay: Duration::from_millis(DEFAULT_BASE_DELAY_MS),
+            max_delay: Duration::from_millis(DEFAULT_MAX_DELAY_MS),
             retry_statuses: DEFAULT_RETRY_STATUSES
                 .iter()
                 .copied()
@@ -134,7 +138,7 @@ impl HttpClient {
                     }
                     tracing::warn!(
                         url = %sanitize_url(url),
-                        error = %e,
+                        error = %describe_reqwest_error(&e),
                         attempt = attempt + 1,
                         "retrying after error"
                     );
@@ -150,7 +154,10 @@ impl HttpClient {
         if let Some(v) = resp.headers().get(RETRY_AFTER) {
             if let Ok(s) = v.to_str() {
                 if let Ok(secs) = s.parse::<u64>() {
-                    return Duration::from_secs(secs);
+                    return cap_duration(Duration::from_secs(secs), self.policy.max_delay);
+                }
+                if let Some(delay) = retry_after_http_date_delay(s, Utc::now()) {
+                    return cap_duration(delay, self.policy.max_delay);
                 }
             }
         }
@@ -158,15 +165,43 @@ impl HttpClient {
     }
 
     fn compute_delay_no_header(&self, attempt: u32) -> Duration {
-        let base = self.policy.base_delay.as_millis() as u64;
+        let base = self
+            .policy
+            .base_delay
+            .as_millis()
+            .try_into()
+            .unwrap_or(u64::MAX);
         let multiplier = 1u64.checked_shl(attempt).unwrap_or(u64::MAX);
         let exp = base.saturating_mul(multiplier);
         let jitter = rand::rng().random_range(0..base.max(1));
-        Duration::from_millis(exp.saturating_add(jitter))
+        cap_duration(
+            Duration::from_millis(exp.saturating_add(jitter)),
+            self.policy.max_delay,
+        )
     }
 }
 
-fn sanitize_url(raw: &str) -> String {
+pub(crate) fn describe_reqwest_error(err: &reqwest::Error) -> String {
+    let mut message = err.to_string();
+    if let Some(url) = err.url() {
+        message = message.replace(url.as_str(), &sanitize_url(url.as_str()));
+    }
+    message
+}
+
+fn retry_after_http_date_delay(value: &str, now: DateTime<Utc>) -> Option<Duration> {
+    let retry_at = DateTime::parse_from_rfc2822(value)
+        .ok()?
+        .with_timezone(&Utc);
+    let delay = retry_at.signed_duration_since(now);
+    delay.to_std().ok().or(Some(Duration::ZERO))
+}
+
+fn cap_duration(delay: Duration, max_delay: Duration) -> Duration {
+    delay.min(max_delay)
+}
+
+pub(crate) fn sanitize_url(raw: &str) -> String {
     let Ok(mut url) = Url::parse(raw) else {
         return "<invalid url>".to_string();
     };
@@ -188,7 +223,29 @@ fn sanitize_url(raw: &str) -> String {
                 .map(|(key, value)| (key.as_str(), value.as_str())),
         );
     }
+    redact_sensitive_path_segments(&mut url);
     url.into()
+}
+
+fn redact_sensitive_path_segments(url: &mut Url) {
+    if url.host_str() != Some("openapi.seoul.go.kr") {
+        return;
+    }
+    let Some(mut segments) = url
+        .path_segments()
+        .map(|segments| segments.map(str::to_owned).collect::<Vec<_>>())
+    else {
+        return;
+    };
+    if segments.get(1).map(String::as_str) != Some("json") {
+        return;
+    }
+    if let Some(first) = segments.first_mut() {
+        *first = "<redacted>".to_string();
+    }
+    if let Ok(mut path) = url.path_segments_mut() {
+        path.clear().extend(segments.iter().map(String::as_str));
+    }
 }
 
 fn is_sensitive_query_key(key: &str) -> bool {
@@ -223,5 +280,51 @@ mod tests {
         assert!(url.contains("foo=bar"), "{url}");
         assert!(!url.contains("neis"), "{url}");
         assert!(!url.contains("kma"), "{url}");
+    }
+
+    #[test]
+    fn sanitize_url_redacts_seoul_open_data_path_token() {
+        let url = sanitize_url(
+            "https://openapi.seoul.go.kr:8088/secret-token/json/WPOSInformationTime/1/5/",
+        );
+
+        assert!(
+            url.contains("/%3Credacted%3E/json/WPOSInformationTime/1/5/"),
+            "{url}"
+        );
+        assert!(!url.contains("secret-token"), "{url}");
+    }
+
+    #[test]
+    fn retry_delay_is_capped() {
+        let c = HttpClient::with_policy(RetryPolicy {
+            max_retries: 2,
+            base_delay: Duration::from_secs(10),
+            max_delay: Duration::from_millis(750),
+            retry_statuses: vec![],
+        })
+        .unwrap();
+
+        assert_eq!(c.compute_delay_no_header(10), Duration::from_millis(750));
+    }
+
+    #[test]
+    fn retry_after_http_date_uses_future_delta() {
+        let now = DateTime::parse_from_rfc2822("Wed, 21 Oct 2015 07:28:00 GMT")
+            .unwrap()
+            .with_timezone(&Utc);
+        let delay = retry_after_http_date_delay("Wed, 21 Oct 2015 07:28:05 GMT", now).unwrap();
+
+        assert_eq!(delay, Duration::from_secs(5));
+    }
+
+    #[test]
+    fn retry_after_http_date_in_the_past_is_zero() {
+        let now = DateTime::parse_from_rfc2822("Wed, 21 Oct 2015 07:28:05 GMT")
+            .unwrap()
+            .with_timezone(&Utc);
+        let delay = retry_after_http_date_delay("Wed, 21 Oct 2015 07:28:00 GMT", now).unwrap();
+
+        assert_eq!(delay, Duration::ZERO);
     }
 }

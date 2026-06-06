@@ -67,7 +67,8 @@ impl KmaClient {
     }
 
     pub async fn fetch_weather(&self) -> HDMealResult<WeatherView> {
-        let (base_date, base_time) = compute_base_time(Utc::now());
+        let now = Utc::now();
+        let (base_date, base_time) = compute_base_time(now);
         let params = vec![
             ("serviceKey", self.config.kma_api_key.clone()),
             ("pageNo", "1".to_string()),
@@ -96,14 +97,13 @@ impl KmaClient {
         let items = resp
             .response
             .body
-            .as_ref()
-            .and_then(|b| b.items.as_ref())
-            .map(|i| i.item.clone())
+            .and_then(|b| b.items)
+            .map(|i| i.item)
             .unwrap_or_default();
 
         // (1) 대표 슬롯: (today KST 09:00) → (tomorrow KST 09:00) → 첫 TMP
-        let today = crate::shared::timezone::today_kst_date();
-        let slot = pick_representative_slot(&items, today)
+        let kst_now = now.with_timezone(&KST);
+        let slot = pick_representative_slot(&items, kst_now.date_naive(), kst_now.hour())
             .ok_or_else(|| HDMealError::service_unavailable("KMA: no items returned"))?;
         let (fcst_date, fcst_time) = slot;
         let ts: DateTime<Utc> = parse_fcst_dt(&fcst_date, &fcst_time)
@@ -126,7 +126,7 @@ impl KmaClient {
                 "TMP" if it.fcst_time == fcst_time => {
                     temp = it.fcst_value.clone();
                     if first_hour.is_empty() {
-                        first_hour = it.fcst_time[0..2].to_string();
+                        first_hour = it.fcst_time.get(..2).unwrap_or("").to_string();
                     }
                 }
                 "SKY" if it.fcst_time == fcst_time => sky = map_sky(&it.fcst_value).to_string(),
@@ -214,7 +214,11 @@ fn compute_base_time(now_utc: DateTime<Utc>) -> (String, String) {
     )
 }
 
-fn pick_representative_slot(items: &[KmaItem], today: NaiveDate) -> Option<(String, String)> {
+fn pick_representative_slot(
+    items: &[KmaItem],
+    today: NaiveDate,
+    current_kst_hour: u32,
+) -> Option<(String, String)> {
     let today_str = today.format("%Y%m%d").to_string();
     if items
         .iter()
@@ -222,7 +226,7 @@ fn pick_representative_slot(items: &[KmaItem], today: NaiveDate) -> Option<(Stri
     {
         return Some((today_str, "0900".to_string()));
     }
-    if Utc::now().with_timezone(&KST).hour() >= 17 {
+    if current_kst_hour >= 17 {
         let tomorrow = today + Duration::days(1);
         let tomorrow_str = tomorrow.format("%Y%m%d").to_string();
         if items
@@ -239,19 +243,12 @@ fn pick_representative_slot(items: &[KmaItem], today: NaiveDate) -> Option<(Stri
 }
 
 fn parse_fcst_dt(date: &str, time: &str) -> Option<DateTime<Utc>> {
-    if date.len() != 8 || time.len() != 4 {
-        return None;
-    }
-    let y = date[0..4].parse().ok()?;
-    let m = date[4..6].parse().ok()?;
-    let d = date[6..8].parse().ok()?;
-    let h = time[0..2].parse().ok()?;
-    let mi = time[2..4].parse().ok()?;
-    let ndt = NaiveDateTime::new(
-        NaiveDate::from_ymd_opt(y, m, d)?,
-        NaiveTime::from_hms_opt(h, mi, 0)?,
-    );
-    Some(KST.from_local_datetime(&ndt).unwrap().with_timezone(&Utc))
+    let date = NaiveDate::parse_from_str(date, "%Y%m%d").ok()?;
+    let time = NaiveTime::parse_from_str(time, "%H%M").ok()?;
+    let ndt = NaiveDateTime::new(date, time);
+    KST.from_local_datetime(&ndt)
+        .single()
+        .map(|dt| dt.with_timezone(&Utc))
 }
 
 // ----------------- KMA DTOs -----------------
@@ -337,7 +334,10 @@ impl SeoulWaterClient {
         let resp = match primary {
             Ok(r) => r,
             Err(e) => {
-                tracing::warn!(error = %e, "seoul water https failed, falling back to http");
+                tracing::warn!(
+                    error = %super::http_client::describe_reqwest_error(&e),
+                    "seoul water https failed, falling back to http"
+                );
                 let r = self
                     .http
                     .inner()
@@ -489,8 +489,30 @@ mod tests {
             nx: 60,
             ny: 127,
         }];
-        let s = pick_representative_slot(&items, today).unwrap();
+        let s = pick_representative_slot(&items, today, 12).unwrap();
         assert_eq!(s, ("20240101".to_string(), "0900".to_string()));
+    }
+
+    #[test]
+    fn representative_slot_uses_tomorrow_0900_after_1700() {
+        let today = NaiveDate::from_ymd_opt(2024, 1, 1).unwrap();
+        let items = vec![KmaItem {
+            base_date: "20240101".into(),
+            base_time: "1700".into(),
+            category: "TMP".into(),
+            fcst_date: "20240102".into(),
+            fcst_time: "0900".into(),
+            fcst_value: "3".into(),
+            nx: 60,
+            ny: 127,
+        }];
+        let s = pick_representative_slot(&items, today, 17).unwrap();
+        assert_eq!(s, ("20240102".to_string(), "0900".to_string()));
+    }
+
+    #[test]
+    fn fcst_dt_rejects_short_time_without_panic() {
+        assert!(parse_fcst_dt("20240101", "9").is_none());
     }
 
     #[test]
