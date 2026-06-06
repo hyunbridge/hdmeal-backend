@@ -7,6 +7,7 @@
 
 use std::env;
 use std::fmt;
+use std::str::FromStr;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result as AnyhowResult};
@@ -105,8 +106,8 @@ impl AppConfig {
         let _ = dotenvy::dotenv();
 
         let app_name = env::var("APP_NAME").unwrap_or_else(|_| "hdmeal-backend".to_string());
-        let debug = parse_bool("DEBUG").unwrap_or(false);
-        let port = parse_u16("PORT").unwrap_or(8000);
+        let debug = parse_bool("DEBUG")?.unwrap_or(false);
+        let port = parse_u16("PORT")?.unwrap_or(8000);
 
         let mongodb_uri = required("MONGODB_URI")?;
         let mongodb_database = required("MONGODB_DATABASE")?;
@@ -114,14 +115,12 @@ impl AppConfig {
         let neis_openapi_token = required("NEIS_OPENAPI_TOKEN")?;
         let atpt_ofcdc_sc_code = required("ATPT_OFCDC_SC_CODE")?;
         let sd_schul_code = required("SD_SCHUL_CODE")?;
-        let num_of_grades =
-            parse_u32("NUM_OF_GRADES").ok_or_else(|| anyhow!("NUM_OF_GRADES 가 필요합니다."))?;
-        let num_of_classes =
-            parse_u32("NUM_OF_CLASSES").ok_or_else(|| anyhow!("NUM_OF_CLASSES 가 필요합니다."))?;
+        let num_of_grades = parse_required_u32("NUM_OF_GRADES")?;
+        let num_of_classes = parse_required_u32("NUM_OF_CLASSES")?;
 
         let kma_api_key = required("HDMeal_KMA_ApiKey")?;
-        let kma_nx = parse_u32("HDMeal_KMA_NX").unwrap_or(60);
-        let kma_ny = parse_u32("HDMeal_KMA_NY").unwrap_or(127);
+        let kma_nx = parse_u32("HDMeal_KMA_NX")?.unwrap_or(60);
+        let kma_ny = parse_u32("HDMeal_KMA_NY")?.unwrap_or(127);
 
         let seoul_data_token = required("HDMeal_SeoulData_Token")?;
 
@@ -139,7 +138,7 @@ impl AppConfig {
         }
         let base_url = Url::parse(&required("HDMeal_BaseURL")?)?;
 
-        let mut allowed_origins = parse_list("HDMeal_AllowedOrigins").unwrap_or_default();
+        let mut allowed_origins = parse_list("HDMeal_AllowedOrigins")?;
         if let Some(origin) = origin_from_url(&base_url) {
             if !allowed_origins.contains(&origin) {
                 allowed_origins.push(origin);
@@ -157,16 +156,24 @@ impl AppConfig {
         }
         let allow_credentials = !allowed_origins.iter().any(|o| o == "*");
 
-        let max_days_range = parse_u32("HDMeal_MaxDaysRange").unwrap_or(31);
+        let max_days_range = parse_u32("HDMeal_MaxDaysRange")?.unwrap_or(31);
         let app_version = env::var("HDMeal_AppVersion").unwrap_or_else(|_| "1.0.0".to_string());
-        let app_build = parse_u32("HDMeal_AppBuild").unwrap_or(1);
+        let app_build = parse_u32("HDMeal_AppBuild")?.unwrap_or(1);
 
-        let cache_health_timetable_ttl =
-            Duration::from_secs(parse_u64("CACHE_HEALTH_TIMETABLE_TTL_HOURS").unwrap_or(3) * 3600);
-        let cache_health_weather_ttl =
-            Duration::from_secs(parse_u64("CACHE_HEALTH_WEATHER_TTL_HOURS").unwrap_or(1) * 3600);
+        let cache_health_timetable_ttl = Duration::from_secs(
+            parse_u64("CACHE_HEALTH_TIMETABLE_TTL_HOURS")?
+                .unwrap_or(3)
+                .saturating_mul(3600),
+        );
+        let cache_health_weather_ttl = Duration::from_secs(
+            parse_u64("CACHE_HEALTH_WEATHER_TTL_HOURS")?
+                .unwrap_or(1)
+                .saturating_mul(3600),
+        );
         let cache_health_water_temp_ttl = Duration::from_secs(
-            parse_u64("CACHE_HEALTH_WATER_TEMP_TTL_MINUTES").unwrap_or(76) * 60,
+            parse_u64("CACHE_HEALTH_WATER_TEMP_TTL_MINUTES")?
+                .unwrap_or(76)
+                .saturating_mul(60),
         );
 
         let otel_endpoint = env::var("OTEL_EXPORTER_OTLP_ENDPOINT")
@@ -207,53 +214,105 @@ impl AppConfig {
 }
 
 fn required(key: &str) -> AnyhowResult<String> {
-    env::var(key).map_err(|_| anyhow!("{key} 가 필요합니다."))
+    let value = env::var(key).map_err(|_| anyhow!("{key} 가 필요합니다."))?;
+    let value = value.trim();
+    if value.is_empty() {
+        return Err(anyhow!("{key} 가 필요합니다."));
+    }
+    Ok(value.to_string())
 }
 
-fn parse_u16(key: &str) -> Option<u16> {
-    env::var(key).ok()?.parse().ok()
+fn parse_required_u32(key: &str) -> AnyhowResult<u32> {
+    parse_u32(key)?.ok_or_else(|| anyhow!("{key} 가 필요합니다."))
 }
 
-fn parse_u32(key: &str) -> Option<u32> {
-    env::var(key).ok()?.parse().ok()
+fn parse_u16(key: &str) -> AnyhowResult<Option<u16>> {
+    parse_optional(key)
 }
 
-fn parse_u64(key: &str) -> Option<u64> {
-    env::var(key).ok()?.parse().ok()
+fn parse_u32(key: &str) -> AnyhowResult<Option<u32>> {
+    parse_optional(key)
 }
 
-fn parse_bool(key: &str) -> Option<bool> {
-    std::env::var(key)
-        .ok()
-        .and_then(|v| match v.trim().to_ascii_lowercase().as_str() {
-            "true" | "1" | "yes" | "on" => Some(true),
-            "false" | "0" | "no" | "off" | "" => Some(false),
-            _ => None,
-        })
+fn parse_u64(key: &str) -> AnyhowResult<Option<u64>> {
+    parse_optional(key)
+}
+
+fn parse_optional<T>(key: &str) -> AnyhowResult<Option<T>>
+where
+    T: FromStr,
+{
+    let raw = match env::var(key) {
+        Ok(value) => value,
+        Err(env::VarError::NotPresent) => return Ok(None),
+        Err(e) => return Err(anyhow!("{key} 읽기 실패: {e}")),
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    trimmed
+        .parse()
+        .map(Some)
+        .map_err(|_| anyhow!("{key} 값이 올바르지 않습니다: {trimmed}"))
+}
+
+fn parse_bool(key: &str) -> AnyhowResult<Option<bool>> {
+    let raw = match env::var(key) {
+        Ok(value) => value,
+        Err(env::VarError::NotPresent) => return Ok(None),
+        Err(e) => return Err(anyhow!("{key} 읽기 실패: {e}")),
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(None);
+    }
+    parse_bool_value(trimmed)
+        .map(Some)
+        .ok_or_else(|| anyhow!("{key} 값이 올바르지 않습니다: {trimmed}"))
+}
+
+fn parse_bool_value(value: &str) -> Option<bool> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "true" | "1" | "yes" | "on" => Some(true),
+        "false" | "0" | "no" | "off" => Some(false),
+        _ => None,
+    }
 }
 
 /// JSON 배열 문자열을 우선 파싱, 실패하면 콤마 구분으로 분리.
 pub fn parse_list(key: &str) -> AnyhowResult<Vec<String>> {
     let raw = match env::var(key) {
         Ok(v) => v,
-        Err(_) => return Ok(Vec::new()),
+        Err(env::VarError::NotPresent) => return Ok(Vec::new()),
+        Err(e) => return Err(anyhow!("{key} 읽기 실패: {e}")),
     };
+    parse_list_value(key, &raw)
+}
+
+fn parse_list_value(key: &str, raw: &str) -> AnyhowResult<Vec<String>> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Ok(Vec::new());
     }
-    if let Ok(arr) = serde_json::from_str::<Vec<String>>(trimmed) {
-        return Ok(arr
-            .into_iter()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect());
+    if trimmed.starts_with('[') {
+        let arr = serde_json::from_str::<Vec<String>>(trimmed)
+            .map_err(|e| anyhow!("{key} JSON 배열 파싱 실패: {e}"))?;
+        return Ok(clean_list_values(arr));
     }
     Ok(trimmed
         .split(',')
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect())
+}
+
+fn clean_list_values(values: impl IntoIterator<Item = String>) -> Vec<String> {
+    values
+        .into_iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 fn origin_from_url(url: &Url) -> Option<String> {
@@ -272,4 +331,36 @@ fn origin_from_url(url: &Url) -> Option<String> {
         }
     }
     Some(origin)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bool_value_accepts_common_forms() {
+        assert_eq!(parse_bool_value("true"), Some(true));
+        assert_eq!(parse_bool_value("ON"), Some(true));
+        assert_eq!(parse_bool_value("0"), Some(false));
+        assert_eq!(parse_bool_value("no"), Some(false));
+        assert_eq!(parse_bool_value("maybe"), None);
+    }
+
+    #[test]
+    fn list_value_parses_json_array() {
+        let list = parse_list_value("TEST_LIST", r#"[" alpha ", "", "beta"]"#).unwrap();
+        assert_eq!(list, vec!["alpha", "beta"]);
+    }
+
+    #[test]
+    fn list_value_rejects_broken_json_array() {
+        let err = parse_list_value("TEST_LIST", r#"["alpha",]"#).unwrap_err();
+        assert!(err.to_string().contains("JSON 배열 파싱 실패"));
+    }
+
+    #[test]
+    fn list_value_falls_back_to_csv() {
+        let list = parse_list_value("TEST_LIST", "alpha, beta,,").unwrap();
+        assert_eq!(list, vec!["alpha", "beta"]);
+    }
 }
