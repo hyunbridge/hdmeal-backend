@@ -132,6 +132,9 @@ impl axum::response::IntoResponse for HDMealError {
         };
         let mut resp = (StatusCode::OK, Json(body)).into_response();
         *resp.status_mut() = status;
+        // 보안 헤더는 `security_headers_layer()` 가 정상 응답에 부착하지만,
+        // 에러 응답은 라우트 매칭 전(fallback_404)이나 핸들러 내에서
+        // 직접 반환될 수 있어 개별 부착이 필요하다.
         crate::transport::http::add_security_headers(resp.headers_mut());
         crate::shared::observability::write_request_id_headers(resp.headers_mut(), &request_id);
         resp
