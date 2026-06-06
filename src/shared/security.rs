@@ -130,8 +130,13 @@ pub struct ValidateUserTokenInput<'a> {
 ///
 /// # Errors
 ///
-/// - `HDMealError::Forbidden` — 서명 불일치, 만료, `sub != uid`, scope 부족.
+/// - `HDMealError::Unauthorized` — 빈 secret, 서명 불일치, 만료, `sub != uid`.
+/// - `HDMealError::Forbidden` — scope 부족.
 pub fn validate_user_token(input: ValidateUserTokenInput<'_>) -> HDMealResult<UserTokenClaims> {
+    if input.secret.trim().is_empty() {
+        return Err(HDMealError::unauthorized("올바르지 않은 토큰입니다."));
+    }
+
     let mut validation = Validation::new(Algorithm::HS256);
     validation.set_issuer(&[JWT_ISSUER]);
     validation.set_required_spec_claims(&["iss", "uid", "scope", "reqId", "nbf", "exp"]);
@@ -143,11 +148,11 @@ pub fn validate_user_token(input: ValidateUserTokenInput<'_>) -> HDMealResult<Us
         &DecodingKey::from_secret(input.secret.as_bytes()),
         &validation,
     )
-    .map_err(|_| HDMealError::forbidden("올바르지 않은 토큰입니다."))?;
+    .map_err(|_| HDMealError::unauthorized("올바르지 않은 토큰입니다."))?;
 
     let claims = data.claims;
     if claims.sub != claims.uid {
-        return Err(HDMealError::forbidden("올바르지 않은 토큰입니다."));
+        return Err(HDMealError::unauthorized("올바르지 않은 토큰입니다."));
     }
     if !claims.scope.iter().any(|s| s == input.required_scope) {
         return Err(HDMealError::forbidden("권한이 없습니다."));
@@ -241,7 +246,7 @@ mod tests {
             required_scope: scope::GET_USER_INFO,
         })
         .unwrap_err();
-        assert_eq!(err.status(), axum::http::StatusCode::FORBIDDEN);
+        assert_eq!(err.status(), axum::http::StatusCode::UNAUTHORIZED);
     }
 
     #[test]
@@ -301,7 +306,7 @@ mod tests {
             required_scope: scope::GET_USER_INFO,
         })
         .unwrap_err();
-        assert_eq!(err.status(), axum::http::StatusCode::FORBIDDEN);
+        assert_eq!(err.status(), axum::http::StatusCode::UNAUTHORIZED);
     }
 
     #[test]

@@ -6,6 +6,7 @@
 //! 사용됩니다.
 
 use std::env;
+use std::fmt;
 use std::time::Duration;
 
 use anyhow::{anyhow, Result as AnyhowResult};
@@ -14,7 +15,7 @@ use url::Url;
 use crate::shared::security::hash_skill_token;
 
 /// 글로벌 앱 설정. 한 번 로드되면 사실상 불변.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct AppConfig {
     pub app_name: String,
     pub debug: bool,
@@ -35,7 +36,7 @@ pub struct AppConfig {
 
     pub seoul_data_token: String,
 
-    pub auth_token_hashes: Vec<[u8; 32]>,
+    pub(crate) auth_token_hashes: Vec<[u8; 32]>,
     pub jwt_secret: String,
     pub base_url: Url,
 
@@ -52,6 +53,46 @@ pub struct AppConfig {
 
     pub otel_endpoint: Option<String>,
     pub otel_service_name: String,
+}
+
+impl fmt::Debug for AppConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AppConfig")
+            .field("app_name", &self.app_name)
+            .field("debug", &self.debug)
+            .field("port", &self.port)
+            .field("mongodb_uri", &"<redacted>")
+            .field("mongodb_database", &self.mongodb_database)
+            .field("neis_openapi_token", &"<redacted>")
+            .field("atpt_ofcdc_sc_code", &self.atpt_ofcdc_sc_code)
+            .field("sd_schul_code", &self.sd_schul_code)
+            .field("num_of_grades", &self.num_of_grades)
+            .field("num_of_classes", &self.num_of_classes)
+            .field("kma_api_key", &"<redacted>")
+            .field("kma_nx", &self.kma_nx)
+            .field("kma_ny", &self.kma_ny)
+            .field("seoul_data_token", &"<redacted>")
+            .field("auth_token_hashes", &"<redacted>")
+            .field("jwt_secret", &"<redacted>")
+            .field("base_url", &self.base_url)
+            .field("allowed_origins", &self.allowed_origins)
+            .field("allow_credentials", &self.allow_credentials)
+            .field("max_days_range", &self.max_days_range)
+            .field("app_version", &self.app_version)
+            .field("app_build", &self.app_build)
+            .field(
+                "cache_health_timetable_ttl",
+                &self.cache_health_timetable_ttl,
+            )
+            .field("cache_health_weather_ttl", &self.cache_health_weather_ttl)
+            .field(
+                "cache_health_water_temp_ttl",
+                &self.cache_health_water_temp_ttl,
+            )
+            .field("otel_endpoint", &self.otel_endpoint)
+            .field("otel_service_name", &self.otel_service_name)
+            .finish()
+    }
 }
 
 impl AppConfig {
@@ -92,7 +133,10 @@ impl AppConfig {
             .iter()
             .map(|token| hash_skill_token(token))
             .collect();
-        let jwt_secret = required("HDMeal_JWTSecret")?;
+        let jwt_secret = required("HDMeal_JWTSecret")?.trim().to_string();
+        if jwt_secret.is_empty() {
+            return Err(anyhow!("HDMeal_JWTSecret 가 필요합니다."));
+        }
         let base_url = Url::parse(&required("HDMeal_BaseURL")?)?;
 
         let mut allowed_origins = parse_list("HDMeal_AllowedOrigins").unwrap_or_default();
