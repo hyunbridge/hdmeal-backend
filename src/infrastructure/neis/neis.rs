@@ -269,18 +269,53 @@ impl NeisClient {
                     continue;
                 }
             };
-            if row.ITRT_CNTNT == "토요휴업일" {
+            let Some(grade) = row.GRADE else {
+                tracing::debug!(date = %date_str, "skipping timetable row without GRADE");
+                continue;
+            };
+            let Some(class_no) = row.CLASS_NM else {
+                tracing::debug!(date = %date_str, grade = grade, "skipping timetable row without CLASS_NM");
+                continue;
+            };
+            let Some(perio) = row.PERIO else {
+                tracing::debug!(
+                    date = %date_str,
+                    grade = grade,
+                    class_no = class_no,
+                    "skipping timetable row without PERIO"
+                );
+                continue;
+            };
+            let Some(subject) = row.ITRT_CNTNT else {
+                tracing::debug!(
+                    date = %date_str,
+                    grade = grade,
+                    class_no = class_no,
+                    perio = perio,
+                    "skipping timetable row without ITRT_CNTNT"
+                );
+                continue;
+            };
+            if subject == "토요휴업일" {
                 continue;
             }
-            let g = row.GRADE.to_string();
-            let c = row.CLASS_NM.to_string();
-            let perio = row.PERIO;
-            let subject = row.ITRT_CNTNT;
+            if grade == 0 || class_no == 0 {
+                tracing::debug!(
+                    date = %date_str,
+                    grade = grade,
+                    class_no = class_no,
+                    perio = perio,
+                    "skipping timetable row with zero grade/class"
+                );
+                continue;
+            }
             if perio == 0 {
                 tracing::warn!("skipping timetable row with PERIO=0 for {}", date_str);
                 continue;
             }
 
+            let g = grade.to_string();
+            let c = class_no.to_string();
             let inner = lessons.entry(g).or_default();
             let arr = inner.entry(c).or_default();
             let idx = perio.saturating_sub(1) as usize;
@@ -498,14 +533,26 @@ struct ScheduleRow {
 #[serde(rename_all = "UPPERCASE")]
 #[allow(non_snake_case)]
 struct TimetableRow {
-    #[serde(rename = "GRADE", deserialize_with = "deserialize_loose_u32")]
-    GRADE: u32,
-    #[serde(rename = "CLASS_NM", deserialize_with = "deserialize_loose_u32")]
-    CLASS_NM: u32,
-    #[serde(rename = "PERIO", deserialize_with = "deserialize_loose_usize")]
-    PERIO: usize,
-    #[serde(rename = "ITRT_CNTNT")]
-    ITRT_CNTNT: String,
+    #[serde(
+        rename = "GRADE",
+        default,
+        deserialize_with = "deserialize_loose_u32_opt"
+    )]
+    GRADE: Option<u32>,
+    #[serde(
+        rename = "CLASS_NM",
+        default,
+        deserialize_with = "deserialize_loose_u32_opt"
+    )]
+    CLASS_NM: Option<u32>,
+    #[serde(
+        rename = "PERIO",
+        default,
+        deserialize_with = "deserialize_loose_usize_opt"
+    )]
+    PERIO: Option<usize>,
+    #[serde(rename = "ITRT_CNTNT", default)]
+    ITRT_CNTNT: Option<String>,
 }
 
 // ----------------- helpers -----------------
@@ -532,42 +579,54 @@ fn empty_timetable_document(date_str: &str) -> TimetableDocument {
     }
 }
 
-fn deserialize_loose_u32<'de, D>(d: D) -> Result<u32, D::Error>
+fn deserialize_loose_u32_opt<'de, D>(d: D) -> Result<Option<u32>, D::Error>
 where
     D: Deserializer<'de>,
 {
     use serde::de::Error;
     let v = serde_json::Value::deserialize(d)?;
     match v {
+        serde_json::Value::Null => Ok(None),
         serde_json::Value::Number(n) => n
             .as_u64()
             .and_then(|x| u32::try_from(x).ok())
+            .map(Some)
             .ok_or_else(|| D::Error::custom("invalid u32")),
         serde_json::Value::String(s) => {
             let digits: String = s.chars().filter(|c| c.is_ascii_digit()).collect();
+            if digits.is_empty() {
+                return Ok(None);
+            }
             digits
                 .parse::<u32>()
+                .map(Some)
                 .map_err(|_| D::Error::custom(format!("invalid u32: {s}")))
         }
         _ => Err(D::Error::custom("expected number or string")),
     }
 }
 
-fn deserialize_loose_usize<'de, D>(d: D) -> Result<usize, D::Error>
+fn deserialize_loose_usize_opt<'de, D>(d: D) -> Result<Option<usize>, D::Error>
 where
     D: Deserializer<'de>,
 {
     use serde::de::Error;
     let v = serde_json::Value::deserialize(d)?;
     match v {
+        serde_json::Value::Null => Ok(None),
         serde_json::Value::Number(n) => n
             .as_u64()
             .and_then(|x| usize::try_from(x).ok())
+            .map(Some)
             .ok_or_else(|| D::Error::custom("invalid usize")),
         serde_json::Value::String(s) => {
             let digits: String = s.chars().filter(|c| c.is_ascii_digit()).collect();
+            if digits.is_empty() {
+                return Ok(None);
+            }
             digits
                 .parse::<usize>()
+                .map(Some)
                 .map_err(|_| D::Error::custom(format!("invalid usize: {s}")))
         }
         _ => Err(D::Error::custom("expected number or string")),
@@ -671,10 +730,25 @@ mod tests {
             "ITRT_CNTNT": "국어"
         });
         let row: TimetableRow = serde_json::from_value(raw).unwrap();
-        assert_eq!(row.GRADE, 1);
-        assert_eq!(row.CLASS_NM, 2);
-        assert_eq!(row.PERIO, 3);
-        assert_eq!(row.ITRT_CNTNT, "국어");
+        assert_eq!(row.GRADE, Some(1));
+        assert_eq!(row.CLASS_NM, Some(2));
+        assert_eq!(row.PERIO, Some(3));
+        assert_eq!(row.ITRT_CNTNT.as_deref(), Some("국어"));
+    }
+
+    #[test]
+    fn timetable_row_tolerates_null_class() {
+        let raw = serde_json::json!({
+            "GRADE": "3",
+            "CLASS_NM": null,
+            "PERIO": "2",
+            "ITRT_CNTNT": "생활과 과학"
+        });
+        let row: TimetableRow = serde_json::from_value(raw).unwrap();
+        assert_eq!(row.GRADE, Some(3));
+        assert_eq!(row.CLASS_NM, None);
+        assert_eq!(row.PERIO, Some(2));
+        assert_eq!(row.ITRT_CNTNT.as_deref(), Some("생활과 과학"));
     }
 
     #[test]

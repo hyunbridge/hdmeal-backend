@@ -258,6 +258,7 @@ impl DataService {
         payload: WeatherUpsert,
     ) -> HDMealResult<WeatherDocument> {
         let now = Utc::now();
+        let doc_id = timestamp_doc_id("weather", &ts);
         let mut update_doc = doc! {
             "$set": {
                 "temp": &payload.temp,
@@ -273,7 +274,10 @@ impl DataService {
         };
         update_doc.insert(
             "$setOnInsert",
-            doc! {"timestamp": bson::DateTime::from_chrono(ts)},
+            doc! {
+                "_id": doc_id,
+                "timestamp": bson::DateTime::from_chrono(ts),
+            },
         );
 
         let opts = mongodb::options::FindOneAndUpdateOptions::builder()
@@ -315,13 +319,17 @@ impl DataService {
         temperature_c: f64,
     ) -> HDMealResult<WaterTemperatureDocument> {
         let now = Utc::now();
+        let doc_id = timestamp_doc_id("water", &ts);
         let filter = doc! {"timestamp": bson::DateTime::from_chrono(ts)};
         let update = doc! {
             "$set": {
                 "temperature_c": temperature_c,
                 "created_at": bson::DateTime::from_chrono(now),
             },
-            "$setOnInsert": {"timestamp": bson::DateTime::from_chrono(ts)},
+            "$setOnInsert": {
+                "_id": doc_id,
+                "timestamp": bson::DateTime::from_chrono(ts),
+            },
         };
         let opts = mongodb::options::FindOneAndUpdateOptions::builder()
             .upsert(true)
@@ -451,6 +459,10 @@ fn build_empty_timetable(
             )
         })
         .collect()
+}
+
+fn timestamp_doc_id(prefix: &str, ts: &DateTime<Utc>) -> String {
+    format!("{prefix}-{}", ts.timestamp())
 }
 
 fn dedup_by_date<T, F>(items: &[T], date: F) -> Vec<T>

@@ -5,6 +5,11 @@
 //!
 //! 둘 다 KST 자정 기준 timestamp 로 [`crate::domain`] 도큐먼트로 저장.
 
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
+
 use chrono::{DateTime, Duration, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike, Utc};
 use serde::Deserialize;
 use url::Url;
@@ -312,11 +317,16 @@ const SEOUL_HTTP_URL_TMPL: &str = "http://openapi.seoul.go.kr:8088";
 pub struct SeoulWaterClient {
     http: HttpClient,
     token: String,
+    https_disabled: Arc<AtomicBool>,
 }
 
 impl SeoulWaterClient {
     pub fn new(http: HttpClient, token: String) -> Self {
-        Self { http, token }
+        Self {
+            http,
+            token,
+            https_disabled: Arc::new(AtomicBool::new(false)),
+        }
     }
 
     /// 한강 수온. HTTPS 먼저 (재시도 없음), 실패 시 HTTP.
@@ -324,20 +334,32 @@ impl SeoulWaterClient {
         let https_url = seoul_water_url(SEOUL_HTTPS_URL_TMPL, &self.token)?;
         let http_url = seoul_water_url(SEOUL_HTTP_URL_TMPL, &self.token)?;
 
-        let primary = self
-            .http
-            .inner()
-            .get(&https_url)
-            .send()
-            .await
-            .and_then(|r| r.error_for_status());
-        let resp = match primary {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!(
-                    error = %super::http_client::describe_reqwest_error(&e),
-                    "seoul water https failed, falling back to http"
-                );
+        let resp = if self.https_disabled.load(Ordering::Relaxed) {
+            None
+        } else {
+            match self
+                .http
+                .inner()
+                .get(&https_url)
+                .send()
+                .await
+                .and_then(|r| r.error_for_status())
+            {
+                Ok(r) => Some(r),
+                Err(e) => {
+                    if !self.https_disabled.swap(true, Ordering::Relaxed) {
+                        tracing::debug!(
+                            error = %super::http_client::describe_reqwest_error(&e),
+                            "seoul water https failed, falling back to http"
+                        );
+                    }
+                    None
+                }
+            }
+        };
+        let resp = match resp {
+            Some(r) => r,
+            None => {
                 let r = self
                     .http
                     .inner()
@@ -355,10 +377,14 @@ impl SeoulWaterClient {
             }
         };
         let body: SeoulWaterResponse = resp.json().await?;
-        let rows = body
+        let info = body
             .wpos_information_time
             .as_ref()
-            .and_then(|w| w.row.clone())
+            .ok_or_else(|| HDMealError::service_unavailable("Seoul water: no rows"))?;
+        validate_seoul_water_result(info.result.as_ref())?;
+        let rows = info
+            .row
+            .clone()
             .ok_or_else(|| HDMealError::service_unavailable("Seoul water: no rows"))?;
         if rows.is_empty() {
             return Err(HDMealError::service_unavailable("Seoul water: empty rows"));
@@ -394,17 +420,35 @@ fn seoul_water_url(base: &str, token: &str) -> HDMealResult<String> {
     Ok(url.into())
 }
 
-/// Seoul 수온 API 의 `YMD` (`"2024-03-01"`) + `HR` (`"15"`) → KST 자정 기준
-/// 측정 시각의 UTC `DateTime`. `HR` 시간 정각, 분/초 = 0 으로 가정.
+/// Seoul 수온 API 의 `YMD` (`"20260607"`) + `HR` (`"22:00"`) → KST 기준
+/// 측정 시각의 UTC `DateTime`. 입력 형식은 정확히 이 형태만 허용한다.
 fn parse_seoul_water_timestamp(ymd: &str, hr: &str) -> HDMealResult<DateTime<Utc>> {
-    let ndt = NaiveDateTime::parse_from_str(&format!("{ymd} {hr}:00:00"), "%Y-%m-%d %H:%M:%S")
+    let date = NaiveDate::parse_from_str(ymd, "%Y%m%d")
         .map_err(|_| HDMealError::service_unavailable("Seoul water: bad YMD/HR"))?;
+    let time = NaiveTime::parse_from_str(hr, "%H:%M")
+        .map_err(|_| HDMealError::service_unavailable("Seoul water: bad YMD/HR"))?;
+    let ndt = NaiveDateTime::new(date, time);
     let ts = KST
         .from_local_datetime(&ndt)
         .single()
         .ok_or_else(|| HDMealError::service_unavailable("Seoul water: ambiguous local time"))?
         .with_timezone(&Utc);
     Ok(ts)
+}
+
+fn validate_seoul_water_result(result: Option<&SeoulWaterResult>) -> HDMealResult<()> {
+    if let Some(result) = result {
+        if result.code.as_deref() != Some("INFO-000") {
+            let msg = result
+                .message
+                .as_deref()
+                .unwrap_or("Seoul water upstream error");
+            return Err(HDMealError::service_unavailable(format!(
+                "Seoul water: {msg}"
+            )));
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -421,7 +465,17 @@ struct SeoulWaterResponse {
 
 #[derive(Debug, Deserialize)]
 struct SeoulWaterInfo {
+    #[serde(rename = "RESULT")]
+    result: Option<SeoulWaterResult>,
     row: Option<Vec<SeoulWaterRow>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SeoulWaterResult {
+    #[serde(rename = "CODE")]
+    code: Option<String>,
+    #[serde(rename = "MESSAGE")]
+    message: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -517,11 +571,11 @@ mod tests {
 
     #[test]
     fn seoul_water_timestamp_parses_ymd_and_hr() {
-        // 2024-03-01 15:00 KST = 2024-03-01 06:00 UTC
-        let ts = parse_seoul_water_timestamp("2024-03-01", "15").unwrap();
+        // 2026-06-07 22:00 KST = 2026-06-07 13:00 UTC
+        let ts = parse_seoul_water_timestamp("20260607", "22:00").unwrap();
         assert_eq!(
             ts,
-            KST.with_ymd_and_hms(2024, 3, 1, 15, 0, 0)
+            KST.with_ymd_and_hms(2026, 6, 7, 22, 0, 0)
                 .unwrap()
                 .with_timezone(&Utc)
         );
@@ -529,15 +583,26 @@ mod tests {
 
     #[test]
     fn seoul_water_timestamp_rejects_bad_ymd() {
-        let err = parse_seoul_water_timestamp("2024/03/01", "15").unwrap_err();
+        let err = parse_seoul_water_timestamp("2024-03-01", "22:00").unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("bad YMD/HR"), "unexpected error: {msg}");
     }
 
     #[test]
     fn seoul_water_timestamp_rejects_bad_hr() {
-        let err = parse_seoul_water_timestamp("2024-03-01", "25").unwrap_err();
+        let err = parse_seoul_water_timestamp("20260607", "25:00").unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("bad YMD/HR"), "unexpected error: {msg}");
+    }
+
+    #[test]
+    fn seoul_water_result_propagates_upstream_message() {
+        let result = SeoulWaterResult {
+            code: Some("ERROR-500".to_string()),
+            message: Some("측정소 또는 서버 오류입니다.".to_string()),
+        };
+        let err = validate_seoul_water_result(Some(&result)).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("측정소 또는 서버 오류입니다."), "{msg}");
     }
 }

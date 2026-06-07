@@ -75,10 +75,16 @@ pub async fn ensure_water_temperature(
     let data = svc.data.clone();
     let res = tokio::time::timeout(Duration::from_secs(2), async move {
         match sw.fetch().await {
-            Ok(reading) => data
+            Ok(reading) => match data
                 .upsert_water_temperature_at(reading.timestamp, reading.temperature_c)
                 .await
-                .ok(),
+            {
+                Ok(doc) => Some(doc),
+                Err(e) => {
+                    tracing::warn!(error = %e, "seoul water cache upsert failed");
+                    Some(water_temperature_document_from_reading(&reading))
+                }
+            },
             Err(e) => {
                 tracing::warn!(error = %e, "seoul water fetch failed");
                 None
@@ -97,10 +103,13 @@ pub async fn ensure_water_temperature(
     tokio::spawn(async move {
         let _ = tokio::time::timeout(Duration::from_secs(5 * 60), async move {
             let reading = svc_clone.seoul_water.fetch().await.ok()?;
-            let _ = svc_clone
+            if let Err(e) = svc_clone
                 .data
                 .upsert_water_temperature_at(reading.timestamp, reading.temperature_c)
-                .await;
+                .await
+            {
+                tracing::warn!(error = %e, "seoul water cache upsert failed");
+            }
             Some(())
         })
         .await;
@@ -166,6 +175,17 @@ pub fn hour_label_from_ts(ts: DateTime<Utc>) -> Cow<'static, str> {
     use chrono::Timelike;
     let kst = ts.with_timezone(&crate::shared::timezone::KST);
     crate::shared::timezone::format_hour(kst.hour())
+}
+
+fn water_temperature_document_from_reading(
+    reading: &crate::infrastructure::neis::auxiliary::SeoulWaterReading,
+) -> WaterTemperatureDocument {
+    WaterTemperatureDocument {
+        id: format!("water-{}", reading.timestamp.timestamp()),
+        timestamp: reading.timestamp.clone(),
+        temperature_c: reading.temperature_c,
+        created_at: Utc::now(),
+    }
 }
 
 fn weather_upsert_from_view(view: WeatherView) -> (DateTime<Utc>, WeatherUpsert) {
