@@ -1,9 +1,27 @@
 # syntax=docker/dockerfile:1.7
 #
 # ---- builder ----
-# rust:1.88-slim-trixie (glibc) + Release LTO=fat.
+# rust:1.88-slim-trixie (glibc) + Release LTO=thin.
 # 결과 바이너리는 glibc 동적 링크. 최종 이미지는 distroless/cc-debian13 (glibc 호환).
+#
+# ---- multi-arch + CPU-specific RUSTFLAGS ----
+# BuildKit 이 `--platform=linux/amd64,linux/arm64` 로 호출 시 TARGETARCH 를
+# 자동 주입한다. arch 별로 다른 RUSTFLAGS 를 cargo build 에 inline 전달.
+#
+# - amd64 (x86_64): x86-64-v3 + SHA-NI
+#   * x86-64-v3 = Haswell+ (2013 Intel, 2017 AMD Zen). AVX2 + FMA + BMI1/2 + LZCNT + MOVBE + F16C.
+#     SIMD vectorize 가능한 모든 hot-path (serde, regex, json, bson) 가속.
+#   * +sha = Intel SHA-NI / AMD SHA Extensions (Zen 1 부터 모든 서버 CPU).
+#     `sha2` crate, `jsonwebtoken` HS256 HMAC 가속.
+#
+# - arm64 (aarch64): neoverse-n1 + sha2 + aes
+#   * neoverse-n1 = AWS Graviton 2/3 (Cortex-A76 microarch). 모든 ARMv8.2+ 호환:
+#     Apple Silicon M1~M4, Graviton 2/3/4, Ampere Altra 모두 실행 가능.
+#   * +sha2 = ARMv8 SHA-256 instruction (모든 Apple Silicon, Graviton, Ampere 지원).
+#   * +aes = ARMv8 AES (mongodb TLS 가속).
 FROM rust:1.88-slim-trixie AS builder
+
+ARG TARGETARCH
 
 WORKDIR /app
 
@@ -16,8 +34,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 # Build cache 효율: 의존성만 먼저 빌드
 COPY Cargo.toml Cargo.lock* ./
-RUN mkdir -p src && echo "fn main(){}" > src/main.rs && echo "" > src/lib.rs \
-    && CARGO_TARGET_DIR=/app/target cargo build --release --locked --bin hdmeal-backend \
+RUN case "$TARGETARCH" in \
+        amd64) RUSTFLAGS="-C target-cpu=x86-64-v3 -C target-feature=+sha" ;; \
+        arm64) RUSTFLAGS="-C target-cpu=neoverse-n1 -C target-feature=+sha2,+aes" ;; \
+        *)     RUSTFLAGS="" ;; \
+    esac && \
+    echo "Building deps for $TARGETARCH with RUSTFLAGS=\"$RUSTFLAGS\"" && \
+    mkdir -p src && echo "fn main(){}" > src/main.rs && echo "" > src/lib.rs \
+    && CARGO_TARGET_DIR=/app/target RUSTFLAGS="$RUSTFLAGS" cargo build --release --locked --bin hdmeal-backend \
     && rm -rf /app/target/release/deps/hdmeal_backend* /app/target/release/hdmeal-backend*
 
 # 실제 소스 빌드
@@ -26,7 +50,13 @@ COPY data ./data
 
 ENV CARGO_NET_GIT_FETCH_WITH_CLI=true
 
-RUN cargo build --release --locked --bin hdmeal-backend \
+RUN case "$TARGETARCH" in \
+        amd64) RUSTFLAGS="-C target-cpu=x86-64-v3 -C target-feature=+sha" ;; \
+        arm64) RUSTFLAGS="-C target-cpu=neoverse-n1 -C target-feature=+sha2,+aes" ;; \
+        *)     RUSTFLAGS="" ;; \
+    esac && \
+    echo "Building for $TARGETARCH with RUSTFLAGS=\"$RUSTFLAGS\"" && \
+    RUSTFLAGS="$RUSTFLAGS" cargo build --release --locked --bin hdmeal-backend \
     && ls -la /app/target/release/hdmeal-backend
 
 # ---- runtime ----
