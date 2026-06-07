@@ -98,10 +98,39 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time",
 [lints.rust]
 unsafe_code = "forbid"
 
-# ----- Release profile (size-focused, measured knobs only) -----
+# ----- Release profile -----
+# 8-프로파일 벤치마크 (scripts/bench_profiles.sh, target/bench-results/) 의
+# 파레토 분석 결과. 사용자 우선순위: perf > size > build.
+#
+# 측정 결과 요약 (macOS arm64, 8 core, Apple M1 기준):
+#   profile | opt | lto  | cgu | main KiB | cold s | JWT ns
+#   A1      | 3   | fat  | 1   |  9,179   |  289   | 5,138
+#   A3*     | 3   | thin | 1   | 10,170   |  182   | 4,805   ← 채택
+#   A4      | 3   | thin | 16  | 11,999   |  125   | 4,887
+#   C1      | 3   | false| 256 | 12,088   |  123   | 5,102
+#   B2      | s   | fat  | 1   |  6,842   |  129   | 6,200
+#   B1      | z   | fat  | 1   |  5,265   |  127   | 8,818   (이전 설정)
+#
+# 결과:
+#   - A3 (lto=thin) 가 A1 (lto=fat) 대비 JWT 등 hot-path 4/6 지표에서 우위.
+#     fat 의 cross-crate inlining 이 이 코드베이스에서는 이득이 없거나
+#     icache 비용으로 이어짐. thin 이 cross-module inline 은 유지하면서
+#     link 시간은 37% 단축.
+#   - opt=z (B1) 는 같은 hot-path 에서 1.84× 느려짐. 사이즈 5.3MB vs 10.2MB.
+#     사용자 우선순위 (perf 우선) 에 따라 opt=3 채택.
+#   - cgu=1 유지: A4 (cgu=16) 와 비교해 JWT 2% 더 빠르고 빌드는 60s 더.
+#   - overflow-checks=false: src/ 어디에도 wrapping_* 의존 없음. release 빌드
+#     산술 overhead 제거.
 [profile.release]
-opt-level = "z"
-lto = "fat"
+opt-level = 3
+lto = "thin"
 codegen-units = 1
 panic = "abort"
 strip = true
+overflow-checks = false
+
+# bench/criterion 사용 시 release 와 동일 flag 적용
+[profile.bench]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
