@@ -73,10 +73,13 @@ pub async fn handle_meal(
 
     // AllergyInfo preference 조회
     let user = svc.users.ensure_user(platform, external_id).await?;
-    let mode = if user.preferences.allergy_info.is_empty() {
+    let mode = if user.preferences.is_empty() {
         "Number"
     } else {
-        user.preferences.allergy_info.as_str()
+        user.preferences
+            .get("AllergyInfo")
+            .map(|s| s.as_str())
+            .unwrap_or("Number")
     };
 
     let mut text = format!("{}:\n", format_date_label(date));

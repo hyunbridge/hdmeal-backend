@@ -58,11 +58,11 @@ async fn get_user_settings(
         current_grade: user.grade,
         current_class: user.class_no,
         preferences: UserSettingsPreferences {
-            allergy_info: if user.preferences.allergy_info.is_empty() {
-                "Number".to_string()
-            } else {
-                user.preferences.allergy_info.clone()
-            },
+            allergy_info: user
+                .preferences
+                .get("AllergyInfo")
+                .cloned()
+                .unwrap_or_else(|| "Number".to_string()),
         },
     };
     Ok((StatusCode::OK, Json(body)).into_response())

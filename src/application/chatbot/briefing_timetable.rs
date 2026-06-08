@@ -1,5 +1,7 @@
 //! Briefing / Timetable intent 핸들러.
 
+use std::collections::BTreeMap;
+
 use chrono::{Datelike, NaiveDate, Timelike, Weekday};
 
 use crate::application::chatbot::sync_helpers::preload_day_bundle;
@@ -7,7 +9,7 @@ use crate::application::chatbot::types::{
     format_menu_with_allergies, parse_date, CardButton, CardMessage, KakaoSkillRequest, Message,
 };
 use crate::application::chatbot::Service;
-use crate::domain::{MealDocument, ScheduleDocument, TimetableDocument, UserPreferences};
+use crate::domain::{MealDocument, ScheduleDocument, TimetableDocument};
 use crate::error::HDMealResult;
 use crate::shared::timezone::{format_weekday_ko, today_kst_date, KST};
 
@@ -198,7 +200,7 @@ fn briefing_meal_text(
     date_label: &str,
     meal: Option<&MealDocument>,
     schedule: Option<&ScheduleDocument>,
-    preferences: &UserPreferences,
+    preferences: &BTreeMap<String, String>,
 ) -> String {
     let Some(meal) = meal else {
         let schedule_text = schedule
@@ -212,10 +214,13 @@ fn briefing_meal_text(
         return "등록된 데이터가 없습니다.".to_string();
     };
 
-    let pref = if preferences.allergy_info.is_empty() {
+    let pref = if preferences.is_empty() {
         "Number"
     } else {
-        preferences.allergy_info.as_str()
+        preferences
+            .get("AllergyInfo")
+            .map(|s| s.as_str())
+            .unwrap_or("Number")
     };
 
     let mut lines = Vec::new();

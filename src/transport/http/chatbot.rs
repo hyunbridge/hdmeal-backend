@@ -40,7 +40,15 @@ async fn skill(
     if !authorize_skill_token_hashed(token.as_deref(), &state.ctx.config.auth_token_hashes) {
         return Err(HDMealError::unauthorized("Unauthorized"));
     }
-    let messages = state.ctx.chatbot.dispatch_internal(&req).await?;
+    let messages = state
+        .ctx
+        .chatbot
+        .dispatch_internal(&req)
+        .await
+        .map_err(|e| {
+            tracing::error!(error = %e, "skill dispatch failed");
+            e
+        })?;
     let resp: KakaoSkillResponse = KakaoSkillResponse::from_messages(messages);
     Ok((StatusCode::OK, Json(resp)).into_response())
 }

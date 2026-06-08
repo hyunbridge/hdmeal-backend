@@ -123,8 +123,8 @@ pub struct WaterTemperatureDocument {
 /// `users` 컬렉션.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct UserDocument {
-    #[serde(rename = "_id", default, skip_serializing_if = "String::is_empty")]
-    pub id: String,
+    #[serde(rename = "_id", default)]
+    pub id: bson::oid::ObjectId,
 
     pub platform: String,
     pub external_id: String,
@@ -133,7 +133,7 @@ pub struct UserDocument {
     pub class_no: Option<i32>,
 
     #[serde(default)]
-    pub preferences: UserPreferences,
+    pub preferences: BTreeMap<String, String>,
 
     #[serde(with = "bson::serde_helpers::datetime::FromChrono04DateTime")]
     pub created_at: DateTime<Utc>,
@@ -142,16 +142,8 @@ pub struct UserDocument {
     pub updated_at: DateTime<Utc>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct UserPreferences {
-    #[serde(default, rename = "AllergyInfo")]
-    pub allergy_info: String,
-}
-
-impl UserPreferences {
-    pub fn is_valid_allergy_info(v: &str) -> bool {
-        matches!(v, "None" | "Number" | "FullText")
-    }
+pub fn is_valid_allergy_info(v: &str) -> bool {
+    matches!(v, "None" | "Number" | "FullText")
 }
 
 /// 사용자가 명시 가능한 preference 키. PATCH 검증에 사용.

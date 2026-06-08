@@ -226,6 +226,117 @@ fn skill_token_constant_time_all_checked() {
 }
 
 #[test]
+fn kakao_request_real_timetable_payload() {
+    let raw = serde_json::json!({
+        "bot": {"id": "5d2d87d3ffa7480001017000!", "name": "흥덕고 급식"},
+        "intent": {"id": "5d6559d992690d000180f9b8", "name": "Timetable", "extra": {"reason": {"code": 0, "message": "OK"}}},
+        "action": {
+            "id": "5e3441d092690d0001fc8a16",
+            "name": "HDMeal API v3",
+            "params": {
+                "date": "{\"date\": \"2026-06-08\", \"dateTag\": \"tomorrow\", \"dateHeadword\": null, \"year\": null, \"month\": null, \"day\": null, \"polynomial\": \"current_day+1days\", \"calendar_type\": \"solar\"}"
+            },
+            "detailParams": {
+                "date": {
+                    "groupName": "",
+                    "origin": "내일",
+                    "value": "{\"date\": \"2026-06-08\", \"dateTag\": \"tomorrow\", \"dateHeadword\": null, \"year\": null, \"month\": null, \"day\": null, \"polynomial\": \"current_day+1days\", \"calendar_type\": \"solar\"}"
+                }
+            },
+            "clientExtra": {}
+        },
+        "userRequest": {
+            "block": {"id": "5d6559d992690d000180f9b8", "name": "Timetable"},
+            "user": {
+                "id": "85ef0327a3b266d6647ce803371502f29752346605c7025436d179c125aff2c869",
+                "type": "botUserKey",
+                "properties": {
+                    "botUserKey": "85ef0327a3b266d6647ce803371502f29752346605c7025436d179c125aff2c869",
+                    "isFriend": true,
+                    "plusfriendUserKey": "RT56jN22pnNs",
+                    "bot_user_key": "85ef0327a3b266d6647ce803371502f29752346605c7025436d179c125aff2c869",
+                    "plusfriend_user_key": "RT56jN22pnNs"
+                }
+            },
+            "utterance": "시간표 알려줘",
+            "params": {"surface": "Kakaotalk.plusfriend"},
+            "lang": "ko",
+            "timezone": "Asia/Seoul"
+        },
+        "contexts": [],
+        "flow": {
+            "lastBlock": {"id": "5d6559d992690d000180f9b8", "name": "Timetable"},
+            "trigger": {
+                "type": "QUICKREPLY_BUTTON_MESSAGE",
+                "referrerBlock": {"id": "5d6559d992690d000180f9b8", "name": "Timetable"}
+            }
+        }
+    });
+    let req: KakaoSkillRequest = serde_json::from_value(raw).unwrap();
+    assert_eq!(req.intent.name, "Timetable");
+    assert_eq!(
+        IntentKind::from_name(&req.intent.name),
+        IntentKind::Timetable
+    );
+    let date = req.action.get_date().unwrap();
+    assert_eq!(date, "2026-06-08");
+}
+
+#[test]
+fn kakao_request_real_meal_payload() {
+    let raw = serde_json::json!({
+        "bot": {"id": "5d2d87d3ffa7480001017000!", "name": "흥덕고 급식"},
+        "intent": {"id": "5d2d893b92690d000173c276", "name": "Meal", "extra": {"reason": {"code": 0, "message": "OK"}}},
+        "action": {
+            "id": "5e3441d092690d0001fc8a16",
+            "name": "HDMeal API v3",
+            "params": {
+                "date": "{\"date\": \"2026-06-08\", \"dateTag\": \"tomorrow\", \"dateHeadword\": null, \"year\": null, \"month\": null, \"day\": null, \"polynomial\": \"current_day+1days\", \"calendar_type\": \"solar\"}"
+            },
+            "detailParams": {
+                "date": {
+                    "groupName": "",
+                    "origin": "내일",
+                    "value": "{\"date\": \"2026-06-08\", \"dateTag\": \"tomorrow\", \"dateHeadword\": null, \"year\": null, \"month\": null, \"day\": null, \"polynomial\": \"current_day+1days\", \"calendar_type\": \"solar\"}"
+                }
+            },
+            "clientExtra": {}
+        },
+        "userRequest": {
+            "block": {"id": "5d2d893b92690d000173c276", "name": "Meal"},
+            "user": {
+                "id": "85ef0327a3b266d6647ce803371502f29752346605c7025436d179c125aff2c869",
+                "type": "botUserKey",
+                "properties": {
+                    "botUserKey": "85ef0327a3b266d6647ce803371502f29752346605c7025436d179c125aff2c869",
+                    "isFriend": true,
+                    "plusfriendUserKey": "RT56jN22pnNs",
+                    "bot_user_key": "85ef0327a3b266d6647ce803371502f29752346605c7025436d179c125aff2c869",
+                    "plusfriend_user_key": "RT56jN22pnNs"
+                }
+            },
+            "utterance": "급식 알려줘",
+            "params": {"surface": "Kakaotalk.plusfriend"},
+            "lang": "ko",
+            "timezone": "Asia/Seoul"
+        },
+        "contexts": [],
+        "flow": {
+            "lastBlock": {"id": "5d2d893b92690d000173c276", "name": "Meal"},
+            "trigger": {
+                "type": "QUICKREPLY_BUTTON_MESSAGE",
+                "referrerBlock": {"id": "5d2d893b92690d000173c276", "name": "Meal"}
+            }
+        }
+    });
+    let req: KakaoSkillRequest = serde_json::from_value(raw).unwrap();
+    assert_eq!(req.intent.name, "Meal");
+    assert_eq!(IntentKind::from_name(&req.intent.name), IntentKind::Meal);
+    let date = req.action.get_date().unwrap();
+    assert_eq!(date, "2026-06-08");
+}
+
+#[test]
 fn metrics_atomic_counter() {
     use hdmeal_backend::shared::metrics::Metrics;
     let m = Metrics::new();

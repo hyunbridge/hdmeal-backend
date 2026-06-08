@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::domain::{UserDocument, UserPreferences, ALLOWED_PREFERENCE_KEYS};
+use crate::domain::{UserDocument, ALLOWED_PREFERENCE_KEYS};
 use crate::error::{HDMealError, HDMealResult};
 use crate::repository::DataService;
 
@@ -75,7 +75,7 @@ impl UserService {
             if v.len() > MAX_PREFERENCE_VALUE_LEN {
                 return Err(HDMealError::bad_request("올바르지 않은 요청입니다."));
             }
-            if k == "AllergyInfo" && !UserPreferences::is_valid_allergy_info(v) {
+            if k == "AllergyInfo" && !crate::domain::is_valid_allergy_info(v) {
                 return Err(HDMealError::bad_request("올바르지 않은 요청입니다."));
             }
             if k == "AllergyInfo" {
