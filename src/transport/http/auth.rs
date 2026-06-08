@@ -21,7 +21,7 @@ pub fn extract_token(
         .and_then(|s| {
             let (scheme, token) = s.trim().split_once(' ')?;
             if scheme.eq_ignore_ascii_case("bearer") {
-                Some(token.trim_matches(' '))
+                Some(token.trim())
             } else {
                 None
             }
