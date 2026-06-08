@@ -155,6 +155,22 @@ pub fn extract_parent_context(headers: &axum::http::HeaderMap) -> opentelemetry:
     global::get_text_map_propagator(|prop| prop.extract(&HeaderExtractor(headers)))
 }
 
+/// HeaderMap → RequestContext (FromRequestParts 없이 직접 호출용).
+pub fn build_http_request_context(headers: &axum::http::HeaderMap) -> RequestContext {
+    let raw = headers
+        .get("X-Request-ID")
+        .or_else(|| headers.get("X-HDMeal-Req-ID"))
+        .or_else(|| headers.get("X-HDMeal-ReqId"))
+        .and_then(|v| v.to_str().ok())
+        .and_then(normalize_request_id)
+        .unwrap_or_else(new_request_id);
+    let parent_cx = extract_parent_context(headers);
+    RequestContext {
+        request_id: raw,
+        parent_cx,
+    }
+}
+
 /// 현재 span context 를 헤더에 inject (traceparent / tracestate).
 pub fn inject_response_headers(headers: &mut axum::http::HeaderMap, cx: &opentelemetry::Context) {
     global::get_text_map_propagator(|prop| {
@@ -206,21 +222,7 @@ where
         parts: &mut axum::http::request::Parts,
         _state: &S,
     ) -> impl std::future::Future<Output = Result<Self, Self::Rejection>> + Send {
-        let raw = parts
-            .headers
-            .get("X-Request-ID")
-            .or_else(|| parts.headers.get("X-HDMeal-Req-ID"))
-            .or_else(|| parts.headers.get("X-HDMeal-ReqId"))
-            .and_then(|v| v.to_str().ok())
-            .and_then(normalize_request_id)
-            .unwrap_or_else(new_request_id);
-        let parent_cx = extract_parent_context(&parts.headers);
-        async move {
-            Ok(RequestContext {
-                request_id: raw,
-                parent_cx,
-            })
-        }
+        async move { Ok(build_http_request_context(&parts.headers)) }
     }
 }
 

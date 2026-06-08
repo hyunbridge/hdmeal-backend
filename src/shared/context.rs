@@ -49,15 +49,6 @@ where
     REQUEST_ID.scope(id, fut).await
 }
 
-/// spawn 시 컨텍스트를 상속시키는 헬퍼.
-pub fn spawn_with_request_id<F>(id: String, fut: F) -> tokio::task::JoinHandle<F::Output>
-where
-    F: Future + Send + 'static,
-    F::Output: Send + 'static,
-{
-    tokio::spawn(REQUEST_ID.scope(id, fut))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

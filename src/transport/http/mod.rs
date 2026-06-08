@@ -20,10 +20,9 @@ use tower_http::set_header::SetResponseHeaderLayer;
 
 use crate::application::AppContext;
 use crate::config::AppConfig;
-use crate::shared::context::{new_request_id, normalize_request_id};
 use crate::shared::metrics::Metrics;
 use crate::shared::observability::{
-    extract_parent_context, inject_response_headers, RequestContext,
+    build_http_request_context, inject_response_headers, RequestContext,
 };
 
 /// 모든 핸들러에 주입되는 라우터 상태.
@@ -103,21 +102,10 @@ pub fn add_security_headers(headers: &mut axum::http::HeaderMap) {
     );
 }
 
-/// 들어오는 헤더에서 `RequestContext` 빌드. observability 미들웨어와 extractor 가
-/// 같은 로직을 공유하도록 helper 로 추출.
+/// HeaderMap → [`RequestContext`]. 실제 구현은 `shared::observability`
+/// 에 단일 출처로 존재합니다.
 pub fn build_request_context(headers: &axum::http::HeaderMap) -> RequestContext {
-    let raw = headers
-        .get("X-Request-ID")
-        .or_else(|| headers.get("X-HDMeal-Req-ID"))
-        .or_else(|| headers.get("X-HDMeal-ReqId"))
-        .and_then(|v| v.to_str().ok())
-        .and_then(normalize_request_id)
-        .unwrap_or_else(new_request_id);
-    let parent_cx = extract_parent_context(headers);
-    RequestContext {
-        request_id: raw,
-        parent_cx,
-    }
+    build_http_request_context(headers)
 }
 
 /// `RequestContext` 결정 → request.extensions 에 주입 → task-local scope 진입.
