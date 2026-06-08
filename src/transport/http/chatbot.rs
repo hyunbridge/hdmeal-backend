@@ -57,7 +57,7 @@ async fn cache_healthcheck(
     State(state): State<RouterState>,
     _rc: RequestContext,
 ) -> Result<Response, HDMealError> {
-    use crate::application::ingestion_service::is_fresh;
+    use crate::shared::freshness::is_fresh;
     use crate::transport::http::dto::api::CacheHealthStatus as CacheHealthcheckStatus;
 
     let today = crate::shared::timezone::today_kst_date();

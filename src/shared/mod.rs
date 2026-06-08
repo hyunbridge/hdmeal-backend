@@ -1,6 +1,7 @@
 //! 횡단 관심사 모음.
 
 pub mod context;
+pub mod freshness;
 pub mod metrics;
 pub mod observability;
 pub mod security;

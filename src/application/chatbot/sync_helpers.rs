@@ -16,7 +16,7 @@ use crate::domain::{
 use crate::infrastructure::neis::auxiliary::WeatherView;
 use crate::repository::WeatherUpsert;
 
-use super::super::ingestion_service::is_fresh;
+use crate::shared::freshness::is_fresh;
 
 pub async fn ensure_weather(svc: &Service, ttl: Duration) -> Option<WeatherDocument> {
     if let Ok(Some(w)) = svc.data.get_latest_weather().await {
