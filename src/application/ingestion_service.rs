@@ -23,7 +23,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::NaiveDate;
 
 use crate::infrastructure::neis::neis::NeisClient;
 use crate::repository::DataService;
@@ -350,31 +350,9 @@ fn persist_error_message(errors: &[(&'static str, String)]) -> Option<String> {
     )
 }
 
-pub const SYNC_TIMEOUT_SHORT_DURATION: Duration = SYNC_TIMEOUT_SHORT;
-pub const SYNC_TIMEOUT_AUX_DURATION: Duration = Duration::from_secs(2);
-
-/// 챗봇 캐시 freshness 헬퍼: `created_at` 기준 TTL 비교.
-pub fn is_fresh(created_at: DateTime<Utc>, ttl: Duration) -> bool {
-    let now = chrono::Utc::now();
-    let age = now.signed_duration_since(created_at);
-    age <= chrono::Duration::from_std(ttl).unwrap_or(chrono::Duration::seconds(0))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn cooldown_returns_true_within_window() {
-        assert!(is_fresh(
-            chrono::Utc::now() - chrono::Duration::seconds(5),
-            Duration::from_secs(60),
-        ));
-        assert!(!is_fresh(
-            chrono::Utc::now() - chrono::Duration::seconds(120),
-            Duration::from_secs(60),
-        ));
-    }
 
     #[test]
     fn persist_error_message_includes_all_failed_collections() {
