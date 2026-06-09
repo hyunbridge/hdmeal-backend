@@ -81,4 +81,9 @@ ENV PORT=8000 \
 USER nonroot
 EXPOSE 8000
 
+# distroless 에는 shell/curl 이 없으므로, 동일 바이너리의 `--healthcheck` 모드로
+# localhost `/healthz` 를 확인한다.
+HEALTHCHECK --interval=10s --timeout=2s --start-period=90s --retries=3 \
+    CMD ["/usr/local/bin/hdmeal-backend", "--healthcheck"]
+
 ENTRYPOINT ["/usr/local/bin/hdmeal-backend"]
