@@ -62,18 +62,20 @@ RUN case "$TARGETARCH" in \
 # ---- runtime ----
 # distroless/cc-debian13: glibc + libgcc + ca-certificates + /etc/passwd(/etc/group)
 # 패키지 매니저 / shell 없음 → 최소 attack surface. tini 불필요 (k8s/container runtime init 사용).
+# read-only rootfs 호환: 런타임 파일 쓰기 없음.
+#   k8s:       securityContext.readOnlyRootFilesystem: true
+#   docker:    docker run --read-only ...
+#   compose:   read_only: true
 FROM gcr.io/distroless/cc-debian13:nonroot AS runtime
 
 WORKDIR /app
 
-# 빌드 산출물 + 정적 데이터
+# 빌드 산출물
 COPY --from=builder /app/target/release/hdmeal-backend /usr/local/bin/hdmeal-backend
-COPY --from=builder /app/data /app/data
 
-ENV DATA_DIR=/app/data \
-    PORT=8000 \
-    RUST_LOG=info \
-    OTEL_SERVICE_NAME=hdmeal-backend
+ENV PORT=8000 \
+	RUST_LOG=info \
+	OTEL_SERVICE_NAME=hdmeal-backend
 
 # nonroot (uid 65532) 가 distroless 에 기본 존재
 USER nonroot
