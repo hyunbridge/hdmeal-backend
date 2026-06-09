@@ -126,3 +126,46 @@ pub async fn handle_modify_user_info(
         .await?;
     Ok(vec![Message::Text("저장되었습니다.".to_string())])
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::WeatherDocument;
+    use chrono::Utc;
+
+    fn sample_weather() -> WeatherDocument {
+        WeatherDocument {
+            id: String::new(),
+            timestamp: Utc::now(),
+            temp: "12".to_string(),
+            temp_min: "5".to_string(),
+            temp_max: "15".to_string(),
+            sky: "맑음".to_string(),
+            pty: "없음".to_string(),
+            precip_probability: "10".to_string(),
+            humidity: "45".to_string(),
+            first_hour: "0800".to_string(),
+            created_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn weather_briefing_text_contains_all_fields() {
+        let w = sample_weather();
+        let text = weather_briefing_text("오늘", &w);
+        assert!(text.contains("오늘"));
+        assert!(text.contains("5℃/15℃"));
+        assert!(text.contains("맑음"));
+        assert!(text.contains("12℃"));
+        assert!(text.contains("없음"));
+        assert!(text.contains("10%"));
+        assert!(text.contains("45%"));
+    }
+
+    #[test]
+    fn weather_briefing_text_uses_date_label() {
+        let w = sample_weather();
+        let text = weather_briefing_text("내일", &w);
+        assert!(text.starts_with("🌡️ 내일"));
+    }
+}

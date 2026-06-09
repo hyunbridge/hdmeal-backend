@@ -341,9 +341,15 @@ mod tests {
     fn bool_value_accepts_common_forms() {
         assert_eq!(parse_bool_value("true"), Some(true));
         assert_eq!(parse_bool_value("ON"), Some(true));
+        assert_eq!(parse_bool_value("1"), Some(true));
+        assert_eq!(parse_bool_value("yes"), Some(true));
+        assert_eq!(parse_bool_value("on"), Some(true));
         assert_eq!(parse_bool_value("0"), Some(false));
         assert_eq!(parse_bool_value("no"), Some(false));
+        assert_eq!(parse_bool_value("false"), Some(false));
+        assert_eq!(parse_bool_value("off"), Some(false));
         assert_eq!(parse_bool_value("maybe"), None);
+        assert_eq!(parse_bool_value(""), None);
     }
 
     #[test]
@@ -362,5 +368,73 @@ mod tests {
     fn list_value_falls_back_to_csv() {
         let list = parse_list_value("TEST_LIST", "alpha, beta,,").unwrap();
         assert_eq!(list, vec!["alpha", "beta"]);
+    }
+
+    #[test]
+    fn list_value_empty_string() {
+        let list = parse_list_value("TEST_LIST", "").unwrap();
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn list_value_whitespace_only() {
+        let list = parse_list_value("TEST_LIST", "   ").unwrap();
+        assert!(list.is_empty());
+    }
+
+    #[test]
+    fn list_value_csv_with_empty_entries() {
+        let list = parse_list_value("TEST_LIST", "a,,b,,").unwrap();
+        assert_eq!(list, vec!["a", "b"]);
+    }
+
+    #[test]
+    fn origin_from_url_https_default_port() {
+        let url = Url::parse("https://hdmeal.kr").unwrap();
+        assert_eq!(origin_from_url(&url), Some("https://hdmeal.kr".to_string()));
+    }
+
+    #[test]
+    fn origin_from_url_custom_port() {
+        let url = Url::parse("https://hdmeal.kr:8443").unwrap();
+        assert_eq!(
+            origin_from_url(&url),
+            Some("https://hdmeal.kr:8443".to_string())
+        );
+    }
+
+    #[test]
+    fn origin_from_url_http_default_port() {
+        let url = Url::parse("http://localhost:80").unwrap();
+        assert_eq!(origin_from_url(&url), Some("http://localhost".to_string()));
+    }
+
+    #[test]
+    fn origin_from_url_http_custom_port() {
+        let url = Url::parse("http://localhost:5173").unwrap();
+        assert_eq!(
+            origin_from_url(&url),
+            Some("http://localhost:5173".to_string())
+        );
+    }
+
+    #[test]
+    fn parse_optional_empty_returns_none() {
+        assert_eq!(
+            parse_optional::<u32>("NONEXISTENT_KEY_FOR_TEST").unwrap(),
+            None
+        );
+    }
+
+    #[test]
+    fn parse_bool_empty_returns_none() {
+        assert_eq!(parse_bool("NONEXISTENT_KEY_FOR_TEST_BOOL").unwrap(), None);
+    }
+
+    #[test]
+    fn parse_list_missing_returns_empty() {
+        assert!(parse_list("NONEXISTENT_KEY_FOR_TEST_LIST")
+            .unwrap()
+            .is_empty());
     }
 }

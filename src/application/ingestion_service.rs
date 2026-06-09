@@ -366,6 +366,11 @@ mod tests {
     }
 
     #[test]
+    fn persist_error_message_none_when_empty() {
+        assert!(persist_error_message(&[]).is_none());
+    }
+
+    #[test]
     fn range_status_sync_header_labels() {
         assert_eq!(RangeStatus::Fresh.sync_header_label(), "fresh");
         assert_eq!(RangeStatus::Inflight.sync_header_label(), "pending");
@@ -388,5 +393,48 @@ mod tests {
         dedup.mark_cooldown(k1);
         assert!(dedup.check_cooldown(k1));
         assert!(!dedup.check_cooldown(k2));
+    }
+
+    #[test]
+    fn range_dedup_cooldown_not_present_initially() {
+        let dedup = RangeDedup::new();
+        assert!(!dedup.check_cooldown("range:2025-01-01:2025-01-07"));
+    }
+
+    #[test]
+    fn range_dedup_inflight_not_present_initially() {
+        let dedup = RangeDedup::new();
+        assert!(!dedup.check_inflight("range:2025-01-01:2025-01-07"));
+    }
+
+    #[test]
+    fn range_dedup_clear_inflight_idempotent() {
+        let dedup = RangeDedup::new();
+        dedup.clear_inflight("nonexistent");
+        dedup.mark_inflight("k");
+        dedup.clear_inflight("k");
+        assert!(!dedup.check_inflight("k"));
+    }
+
+    #[test]
+    fn key_range_format() {
+        let start = NaiveDate::from_ymd_opt(2025, 1, 1).unwrap();
+        let end = NaiveDate::from_ymd_opt(2025, 1, 7).unwrap();
+        assert_eq!(
+            IngestionService::key_range(start, end),
+            "range:2025-01-01:2025-01-07"
+        );
+    }
+
+    #[test]
+    fn prune_locked_removes_old_entries() {
+        let mut map = HashMap::new();
+        let now = Instant::now();
+        let old = now - Duration::from_secs(7200);
+        map.insert("old".to_string(), old);
+        map.insert("recent".to_string(), now);
+        prune_locked(now, &mut map);
+        assert!(!map.contains_key("old"));
+        assert!(map.contains_key("recent"));
     }
 }

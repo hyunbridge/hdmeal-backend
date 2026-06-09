@@ -279,3 +279,127 @@ fn format_group_line(start: NaiveDate, end: NaiveDate, summary: &str) -> String 
         )
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::ScheduleDocument;
+    use chrono::Utc;
+
+    fn d(y: i32, m: u32, d: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, d).unwrap()
+    }
+
+    #[test]
+    fn render_single_date_with_schedule() {
+        let docs = vec![ScheduleDocument {
+            id: String::new(),
+            date: "2026-06-09".to_string(),
+            entries: vec![],
+            summary: Some("중간고사".to_string()),
+            created_at: Utc::now(),
+        }];
+        let result = render_schedule_range(&docs, d(2026, 6, 9), d(2026, 6, 9), false);
+        assert!(result.contains("중간고사"));
+    }
+
+    #[test]
+    fn render_single_date_no_schedule() {
+        let result = render_schedule_range(&[], d(2026, 6, 9), d(2026, 6, 9), false);
+        assert!(result.contains("일정이 없습니다"));
+    }
+
+    #[test]
+    fn render_range_groups_same_summary() {
+        let docs = vec![
+            ScheduleDocument {
+                id: String::new(),
+                date: "2026-06-09".to_string(),
+                entries: vec![],
+                summary: Some("방학".to_string()),
+                created_at: Utc::now(),
+            },
+            ScheduleDocument {
+                id: String::new(),
+                date: "2026-06-10".to_string(),
+                entries: vec![],
+                summary: Some("방학".to_string()),
+                created_at: Utc::now(),
+            },
+            ScheduleDocument {
+                id: String::new(),
+                date: "2026-06-11".to_string(),
+                entries: vec![],
+                summary: Some("개학".to_string()),
+                created_at: Utc::now(),
+            },
+        ];
+        let result = render_schedule_range(&docs, d(2026, 6, 9), d(2026, 6, 11), false);
+        assert!(result.contains("방학"));
+        assert!(result.contains("개학"));
+        assert!(
+            result.contains('~'),
+            "should contain a date range: {result}"
+        );
+    }
+
+    #[test]
+    fn render_range_with_gaps() {
+        let docs = vec![ScheduleDocument {
+            id: String::new(),
+            date: "2026-06-11".to_string(),
+            entries: vec![],
+            summary: Some("개학".to_string()),
+            created_at: Utc::now(),
+        }];
+        let result = render_schedule_range(&docs, d(2026, 6, 9), d(2026, 6, 11), false);
+        assert!(result.contains("일정이 없습니다"));
+        assert!(result.contains("개학"));
+    }
+
+    #[test]
+    fn format_group_line_same_date() {
+        let line = format_group_line(d(2026, 6, 9), d(2026, 6, 9), "테스트");
+        assert!(!line.contains('~'));
+        assert!(line.contains("테스트"));
+    }
+
+    #[test]
+    fn format_group_line_date_range() {
+        let line = format_group_line(d(2026, 6, 9), d(2026, 6, 11), "테스트");
+        assert!(line.contains('~'));
+        assert!(line.contains("테스트"));
+    }
+
+    #[test]
+    fn render_empty_range() {
+        let result = render_schedule_range(&[], d(2026, 6, 9), d(2026, 6, 9), false);
+        assert!(result.contains("일정이 없습니다"));
+    }
+
+    #[test]
+    fn render_schedule_with_empty_summary_falls_back() {
+        let docs = vec![ScheduleDocument {
+            id: String::new(),
+            date: "2026-06-09".to_string(),
+            entries: vec![],
+            summary: Some("".to_string()),
+            created_at: Utc::now(),
+        }];
+        let result = render_schedule_range(&docs, d(2026, 6, 9), d(2026, 6, 9), false);
+        assert!(result.contains("일정이 없습니다"));
+    }
+
+    #[test]
+    fn render_schedule_with_none_summary_falls_back() {
+        let docs = vec![ScheduleDocument {
+            id: String::new(),
+            date: "2026-06-09".to_string(),
+            entries: vec![],
+            summary: None,
+            created_at: Utc::now(),
+        }];
+        let result = render_schedule_range(&docs, d(2026, 6, 9), d(2026, 6, 9), false);
+        assert!(result.contains("일정이 없습니다"));
+    }
+}

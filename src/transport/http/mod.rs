@@ -407,4 +407,94 @@ mod tests {
         };
         let _ = cors_layer(&cfg);
     }
+
+    #[tokio::test]
+    async fn fallback_404_returns_not_found() {
+        let app = Router::new().fallback(fallback_404);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/nonexistent-path")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+        let body = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["detail"], "요청한 경로를 찾을 수 없습니다.");
+    }
+
+    #[tokio::test]
+    async fn fallback_404_through_middleware_chain_sets_headers_and_request_id() {
+        let security = ServiceBuilder::new()
+            .layer(SetResponseHeaderLayer::overriding(
+                axum::http::header::STRICT_TRANSPORT_SECURITY,
+                HeaderValue::from_static("max-age=31536000"),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                HeaderName::from_static("x-content-type-options"),
+                HeaderValue::from_static("nosniff"),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                HeaderName::from_static("x-frame-options"),
+                HeaderValue::from_static("DENY"),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                HeaderName::from_static("content-security-policy"),
+                HeaderValue::from_static("default-src 'none'"),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                HeaderName::from_static("referrer-policy"),
+                HeaderValue::from_static("no-referrer"),
+            ));
+
+        let app = Router::new()
+            .route("/ok", get(|| async { "ok" }))
+            .fallback(fallback_404)
+            .layer(middleware::from_fn(inject_observability_headers))
+            .layer(middleware::from_fn(request_id_middleware))
+            .layer(security);
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/anything")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::NOT_FOUND);
+
+        let headers = resp.headers().clone();
+        for key in [
+            "strict-transport-security",
+            "x-content-type-options",
+            "x-frame-options",
+            "content-security-policy",
+            "referrer-policy",
+            "x-request-id",
+            "x-hdmeal-req-id",
+        ] {
+            assert!(headers.contains_key(key), "missing header: {key}");
+        }
+
+        let request_id = headers
+            .get("x-request-id")
+            .and_then(|v| v.to_str().ok())
+            .unwrap()
+            .to_string();
+        assert_eq!(
+            headers.get("x-hdmeal-req-id").and_then(|v| v.to_str().ok()),
+            Some(request_id.as_str())
+        );
+
+        let body = axum::body::to_bytes(resp.into_body(), 1024).await.unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(json["detail"], "요청한 경로를 찾을 수 없습니다.");
+        assert_eq!(json["requestId"].as_str(), Some(request_id.as_str()));
+    }
 }

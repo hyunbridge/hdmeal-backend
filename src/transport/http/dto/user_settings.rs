@@ -59,3 +59,73 @@ pub struct UserSettingsPreferences {
 pub struct UserSettingsMessage {
     pub message: String,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn deserialize_loose_int_from_number() {
+        let json = r#"{"user_grade": 2, "user_class": 3}"#;
+        let req: UpdateUserSettingsRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.user_grade, 2);
+        assert_eq!(req.user_class, 3);
+    }
+
+    #[test]
+    fn deserialize_loose_int_from_korean_string() {
+        let json = r#"{"user_grade": "2학년", "user_class": "3반"}"#;
+        let req: UpdateUserSettingsRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.user_grade, 2);
+        assert_eq!(req.user_class, 3);
+    }
+
+    #[test]
+    fn deserialize_loose_int_from_plain_string() {
+        let json = r#"{"user_grade": "1", "user_class": "5"}"#;
+        let req: UpdateUserSettingsRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.user_grade, 1);
+        assert_eq!(req.user_class, 5);
+    }
+
+    #[test]
+    fn deserialize_loose_int_rejects_non_numeric_string() {
+        let json = r#"{"user_grade": "abc", "user_class": 1}"#;
+        assert!(serde_json::from_str::<UpdateUserSettingsRequest>(json).is_err());
+    }
+
+    #[test]
+    fn deserialize_preferences_default_empty() {
+        let json = r#"{"user_grade": 1, "user_class": 1}"#;
+        let req: UpdateUserSettingsRequest = serde_json::from_str(json).unwrap();
+        assert!(req.preferences.is_empty());
+    }
+
+    #[test]
+    fn deserialize_preferences_provided() {
+        let json =
+            r#"{"user_grade": 1, "user_class": 1, "preferences": {"AllergyInfo": "Number"}}"#;
+        let req: UpdateUserSettingsRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.preferences.get("AllergyInfo").unwrap(), "Number");
+    }
+
+    #[test]
+    fn user_settings_response_serializes() {
+        let resp = UserSettingsResponse {
+            classes: vec![1, 2, 3],
+            grades: vec![1, 2],
+            current_grade: Some(2),
+            current_class: Some(3),
+            preferences: UserSettingsPreferences {
+                allergy_info: "Number".to_string(),
+            },
+        };
+        let json = serde_json::to_value(&resp).unwrap();
+        assert_eq!(json["grades"][0], 1);
+        assert_eq!(json["grades"][1], 2);
+        assert_eq!(json["classes"][0], 1);
+        assert_eq!(json["classes"][2], 3);
+        assert_eq!(json["current_grade"], 2);
+        assert_eq!(json["preferences"]["AllergyInfo"], "Number");
+    }
+}

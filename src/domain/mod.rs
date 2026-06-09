@@ -148,3 +148,29 @@ pub fn is_valid_allergy_info(v: &str) -> bool {
 
 /// 사용자가 명시 가능한 preference 키. PATCH 검증에 사용.
 pub const ALLOWED_PREFERENCE_KEYS: &[&str] = &["AllergyInfo"];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_valid_allergy_info_valid() {
+        assert!(is_valid_allergy_info("None"));
+        assert!(is_valid_allergy_info("Number"));
+        assert!(is_valid_allergy_info("FullText"));
+    }
+
+    #[test]
+    fn is_valid_allergy_info_invalid() {
+        assert!(!is_valid_allergy_info("Fulltext"));
+        assert!(!is_valid_allergy_info("none"));
+        assert!(!is_valid_allergy_info(""));
+        assert!(!is_valid_allergy_info("other"));
+    }
+
+    #[test]
+    fn allowed_preference_keys_content() {
+        assert_eq!(ALLOWED_PREFERENCE_KEYS.len(), 1);
+        assert!(ALLOWED_PREFERENCE_KEYS.contains(&"AllergyInfo"));
+    }
+}

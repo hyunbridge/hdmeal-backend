@@ -119,6 +119,37 @@ pub fn naive_utc_to_kst_date(dt: NaiveDateTime) -> NaiveDate {
     Utc.from_utc_datetime(&dt).with_timezone(&KST).date_naive()
 }
 
+/// 시간 주입 시임. 프로덕션은 `RealClock`, 테스트는 `FixedClock` 사용.
+pub trait Clock: Send + Sync + 'static {
+    fn now_utc(&self) -> DateTime<Utc>;
+    fn now_kst(&self) -> DateTime<FixedOffset> {
+        self.now_utc().with_timezone(&KST)
+    }
+    fn today_kst_date(&self) -> NaiveDate {
+        self.now_kst().date_naive()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct RealClock;
+
+impl Clock for RealClock {
+    fn now_utc(&self) -> DateTime<Utc> {
+        Utc::now()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct FixedClock {
+    pub utc: DateTime<Utc>,
+}
+
+impl Clock for FixedClock {
+    fn now_utc(&self) -> DateTime<Utc> {
+        self.utc
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -154,5 +185,20 @@ mod tests {
         let utc = kst_midnight_to_utc(d);
         // 2024-01-01 00:00 KST = 2023-12-31 15:00 UTC
         assert_eq!(utc, Utc.with_ymd_and_hms(2023, 12, 31, 15, 0, 0).unwrap());
+    }
+
+    #[test]
+    fn fixed_clock_returns_fixed_time() {
+        let fixed = Utc.with_ymd_and_hms(2025, 6, 1, 12, 0, 0).unwrap();
+        let clock = FixedClock { utc: fixed };
+        assert_eq!(clock.now_utc(), fixed);
+    }
+
+    #[test]
+    fn fixed_clock_independent_of_system_time() {
+        let fixed = Utc.with_ymd_and_hms(2020, 1, 1, 0, 0, 0).unwrap();
+        let clock = FixedClock { utc: fixed };
+        assert_eq!(clock.now_utc(), fixed);
+        assert_ne!(clock.now_utc(), Utc::now());
     }
 }

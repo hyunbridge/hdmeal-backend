@@ -290,3 +290,195 @@ fn build_timetable_text(
     }
     Some(text)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::{MealDocument, ScheduleDocument, TimetableDocument};
+    use chrono::Utc;
+    use std::collections::BTreeMap;
+
+    fn d(y: i32, m: u32, day: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(y, m, day).unwrap()
+    }
+
+    #[test]
+    fn briefing_schedule_text_with_summary() {
+        let doc = ScheduleDocument {
+            id: String::new(),
+            date: "2026-06-09".to_string(),
+            entries: vec![],
+            summary: Some("중간고사".to_string()),
+            created_at: Utc::now(),
+        };
+        let text = briefing_schedule_text("오늘", Some(&doc));
+        assert!(text.contains("중간고사"));
+        assert!(text.contains("학사일정"));
+    }
+
+    #[test]
+    fn briefing_schedule_text_without_summary() {
+        let doc = ScheduleDocument {
+            id: String::new(),
+            date: "2026-06-09".to_string(),
+            entries: vec![],
+            summary: None,
+            created_at: Utc::now(),
+        };
+        let text = briefing_schedule_text("오늘", Some(&doc));
+        assert!(text.contains("학사일정이 없습니다"));
+    }
+
+    #[test]
+    fn briefing_schedule_text_none_schedule() {
+        let text = briefing_schedule_text("오늘", None);
+        assert!(text.contains("학사일정이 없습니다"));
+    }
+
+    #[test]
+    fn briefing_meal_text_with_meal() {
+        let meal = MealDocument {
+            id: String::new(),
+            date: "2026-06-09".to_string(),
+            menus: vec![crate::domain::MealMenuItem {
+                name: "밥".to_string(),
+                allergies: vec![1],
+            }],
+            menus_plain: vec![],
+            calories: Some(800.0),
+            source_hash: None,
+            created_at: Utc::now(),
+        };
+        let mut prefs = BTreeMap::new();
+        prefs.insert("AllergyInfo".to_string(), "Number".to_string());
+        let text = briefing_meal_text("오늘", Some(&meal), None, &prefs);
+        assert!(text.contains("급식"));
+        assert!(text.contains("800"));
+    }
+
+    #[test]
+    fn briefing_meal_text_no_meal_with_schedule() {
+        let schedule = ScheduleDocument {
+            id: String::new(),
+            date: "2026-06-09".to_string(),
+            entries: vec![],
+            summary: Some("방학".to_string()),
+            created_at: Utc::now(),
+        };
+        let text = briefing_meal_text("오늘", None, Some(&schedule), &BTreeMap::new());
+        assert!(text.contains("급식을 실시하지 않습니다"));
+        assert!(text.contains("방학"));
+    }
+
+    #[test]
+    fn briefing_meal_text_no_meal_no_schedule() {
+        let text = briefing_meal_text("오늘", None, None, &BTreeMap::new());
+        assert!(text.contains("등록된 데이터가 없습니다"));
+    }
+
+    #[test]
+    fn briefing_timetable_text_no_grade() {
+        let text = briefing_timetable_text("오늘", d(2026, 6, 9), None, None, None);
+        assert!(text.contains("등록된 사용자만"));
+    }
+
+    #[test]
+    fn briefing_timetable_text_no_class() {
+        let text = briefing_timetable_text("오늘", d(2026, 6, 9), None, Some(1), None);
+        assert!(text.contains("등록된 사용자만"));
+    }
+
+    #[test]
+    fn briefing_timetable_text_no_timetable() {
+        let text = briefing_timetable_text("오늘", d(2026, 6, 9), None, Some(1), Some(2));
+        assert!(text.contains("등록된 시간표가 없습니다"));
+    }
+
+    #[test]
+    fn briefing_timetable_text_with_timetable() {
+        let mut lessons = BTreeMap::new();
+        let mut class_map = BTreeMap::new();
+        class_map.insert(
+            "2".to_string(),
+            vec!["국어".to_string(), "수학".to_string()],
+        );
+        lessons.insert("1".to_string(), class_map);
+        let doc = TimetableDocument {
+            id: String::new(),
+            date: "2026-06-09".to_string(),
+            lessons,
+            created_at: Utc::now(),
+        };
+        let text = briefing_timetable_text("오늘", d(2026, 6, 9), Some(&doc), Some(1), Some(2));
+        assert!(text.contains("시간표"));
+        assert!(text.contains("국어"));
+        assert!(text.contains("수학"));
+    }
+
+    #[test]
+    fn build_timetable_text_returns_none_for_empty_lessons() {
+        let doc = TimetableDocument {
+            id: String::new(),
+            date: "2026-06-09".to_string(),
+            lessons: BTreeMap::new(),
+            created_at: Utc::now(),
+        };
+        assert!(build_timetable_text(d(2026, 6, 9), 1, 2, Some(&doc)).is_none());
+    }
+
+    #[test]
+    fn build_timetable_text_returns_none_for_wrong_grade() {
+        let mut lessons = BTreeMap::new();
+        let mut class_map = BTreeMap::new();
+        class_map.insert("2".to_string(), vec!["국어".to_string()]);
+        lessons.insert("1".to_string(), class_map);
+        let doc = TimetableDocument {
+            id: String::new(),
+            date: "2026-06-09".to_string(),
+            lessons,
+            created_at: Utc::now(),
+        };
+        assert!(build_timetable_text(d(2026, 6, 9), 3, 2, Some(&doc)).is_none());
+    }
+
+    #[test]
+    fn build_timetable_text_returns_none_for_wrong_class() {
+        let mut lessons = BTreeMap::new();
+        let mut class_map = BTreeMap::new();
+        class_map.insert("2".to_string(), vec!["국어".to_string()]);
+        lessons.insert("1".to_string(), class_map);
+        let doc = TimetableDocument {
+            id: String::new(),
+            date: "2026-06-09".to_string(),
+            lessons,
+            created_at: Utc::now(),
+        };
+        assert!(build_timetable_text(d(2026, 6, 9), 1, 5, Some(&doc)).is_none());
+    }
+
+    #[test]
+    fn build_timetable_text_returns_none_when_none() {
+        assert!(build_timetable_text(d(2026, 6, 9), 1, 2, None).is_none());
+    }
+
+    #[test]
+    fn build_timetable_text_formats_correctly() {
+        let mut lessons = BTreeMap::new();
+        let mut class_map = BTreeMap::new();
+        class_map.insert(
+            "1".to_string(),
+            vec!["국어".to_string(), "영어".to_string()],
+        );
+        lessons.insert("2".to_string(), class_map);
+        let doc = TimetableDocument {
+            id: String::new(),
+            date: "2026-06-09".to_string(),
+            lessons,
+            created_at: Utc::now(),
+        };
+        let text = build_timetable_text(d(2026, 6, 9), 2, 1, Some(&doc)).unwrap();
+        assert!(text.contains("2학년 1반"));
+        assert!(text.contains("1교시: 국어"));
+        assert!(text.contains("2교시: 영어"));
+    }
+}

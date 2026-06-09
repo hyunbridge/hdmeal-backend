@@ -129,11 +129,94 @@ impl axum::response::IntoResponse for HDMealError {
             request_id: request_id.clone(),
         };
         let mut resp = (status, Json(body)).into_response();
-        // 보안 헤더는 `security_headers_layer()` 가 정상 응답에 부착하지만,
-        // 에러 응답은 라우트 매칭 전(fallback_404)이나 핸들러 내에서
-        // 직접 반환될 수 있어 개별 부착이 필요하다.
         crate::transport::http::add_security_headers(resp.headers_mut());
         crate::shared::observability::write_request_id_headers(resp.headers_mut(), &request_id);
         resp
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::http::StatusCode;
+
+    #[test]
+    fn bad_request_status() {
+        let e = HDMealError::bad_request("msg");
+        assert_eq!(e.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(e.public_message(), "msg");
+    }
+
+    #[test]
+    fn unauthorized_status() {
+        let e = HDMealError::unauthorized("msg");
+        assert_eq!(e.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(e.public_message(), "msg");
+    }
+
+    #[test]
+    fn forbidden_status() {
+        let e = HDMealError::forbidden("msg");
+        assert_eq!(e.status(), StatusCode::FORBIDDEN);
+        assert_eq!(e.public_message(), "msg");
+    }
+
+    #[test]
+    fn not_found_status() {
+        let e = HDMealError::not_found("msg");
+        assert_eq!(e.status(), StatusCode::NOT_FOUND);
+        assert_eq!(e.public_message(), "msg");
+    }
+
+    #[test]
+    fn service_unavailable_status() {
+        let e = HDMealError::service_unavailable("msg");
+        assert_eq!(e.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(e.public_message(), "msg");
+    }
+
+    #[test]
+    fn internal_status() {
+        let e = HDMealError::internal("msg");
+        assert_eq!(e.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(e.public_message(), "서버 오류가 발생했습니다");
+    }
+
+    #[test]
+    fn json_error_maps_to_bad_request() {
+        let json_err = serde_json::from_str::<i32>("not a number").unwrap_err();
+        let e = HDMealError::Json(json_err);
+        assert_eq!(e.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(e.public_message(), "잘못된 요청 본문입니다.");
+    }
+
+    #[test]
+    fn jwt_error_maps_to_unauthorized() {
+        let jwt_err = jsonwebtoken::decode_header("not-a-jwt").unwrap_err();
+        let e = HDMealError::Jwt(jwt_err);
+        assert_eq!(e.status(), StatusCode::UNAUTHORIZED);
+        assert_eq!(e.public_message(), "올바르지 않은 토큰입니다.");
+    }
+
+    #[test]
+    fn http_error_maps_to_service_unavailable() {
+        use tokio::runtime::Runtime;
+        let rt = Runtime::new().unwrap();
+        let err = rt.block_on(async {
+            let client = reqwest::Client::builder().build().unwrap();
+            let url = reqwest::Url::parse("http://0.0.0.0:1").unwrap();
+            let req = client.get(url).build().unwrap();
+            client.execute(req).await.unwrap_err()
+        });
+        let e = HDMealError::Http(err);
+        assert_eq!(e.status(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(e.public_message(), "외부 API 연결에 실패했습니다.");
+    }
+
+    #[test]
+    fn io_error_maps_to_internal() {
+        let e = HDMealError::Io(std::io::Error::new(std::io::ErrorKind::Other, "io fail"));
+        assert_eq!(e.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(e.public_message(), "서버 오류가 발생했습니다");
     }
 }
