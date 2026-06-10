@@ -66,7 +66,7 @@ jobs:
         run: |
           {
             echo 'tags<<EOF'
-            printf '%s\n' "${{ steps.meta.outputs.tags }}" | sed "s#$#-${{ matrix.arch }}#"
+            printf '%s\n' "${{ steps.meta.outputs.tags }}" | awk -v suffix="-${{ matrix.arch }}" 'NF { print $0 suffix }'
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
 
