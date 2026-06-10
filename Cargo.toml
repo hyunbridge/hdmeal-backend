@@ -50,10 +50,10 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v7", "v4", "serde"] }
-# HS256 만 사용하므로 aws_lc_rs 대신 pure-Rust crypto (hmac+sha2) 사용.
-# jsonwebtoken 10.x 는 ring feature 가 없고, 동등한 의도의 feature 가 `rust_crypto`
-# (RustCrypto 의 hmac + sha2). aws_lc_rs 를 통째로 빼면 ~1.5MB + C 빌드 의존성 절감.
-jsonwebtoken = { version = "10", default-features = false, features = ["rust_crypto"] }
+# HS256 만 사용한다. jsonwebtoken 은 클레임 파싱/검증만 맡기고,
+# 서명/검증은 ring 기반 HMAC-SHA256 provider 로 처리해 RSA/ECDSA 의존성을 제외한다.
+jsonwebtoken = { version = "10", default-features = false }
+ring = "0.17"
 # reqwest: `rustls-no-provider` (NOT `rustls`) — `rustls` feature 가 `__rustls-aws-lc-rs` 를
 # 강제 활성화시켜 rustls-webpki/rustls/tokio-rustls/hyper-rustls 전부에 `aws-lc-rs` C 라이브러리
 # (~1.5MB) 가 들어가게 만든다. `rustls-no-provider` 는 명시적 provider 미설치 상태로 빌드되므로
@@ -88,7 +88,8 @@ rand = "0.10"
 futures-util = "0.3"
 url = "2"
 subtle = "2"
-sha2 = "0.10"
+# 인증 토큰을 고정 길이 digest 로 만든 뒤 상수 시간 비교에 사용.
+sha2 = "0.11"
 
 # 테스트 / 벤치 / 예제 빌드 시에만 활성화되는 추가 feature.
 # release 빌드에는 포함되지 않으므로, 런타임 바이너리 크기에 영향 없음.

@@ -6,12 +6,103 @@
 //!   `"HDMeal-UserSettings"`, TTL 10분.
 
 use chrono::{Duration, Utc};
+use jsonwebtoken::crypto::{CryptoProvider, JwkUtils, JwtSigner, JwtVerifier};
+use jsonwebtoken::errors::{ErrorKind, Result as JwtResult};
+use jsonwebtoken::signature::{Signer, Verifier};
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
+use ring::hmac;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::sync::OnceLock;
 use subtle::ConstantTimeEq;
 
 use crate::error::{HDMealError, HDMealResult};
+
+type HmacSha256 = hmac::Key;
+
+static JWT_HMAC_PROVIDER: CryptoProvider = CryptoProvider {
+    signer_factory: jwt_hmac_signer_factory,
+    verifier_factory: jwt_hmac_verifier_factory,
+    jwk_utils: JwkUtils::new_unimplemented(),
+};
+
+static JWT_HMAC_PROVIDER_INIT: OnceLock<()> = OnceLock::new();
+
+/// jsonwebtoken 의 process-wide crypto provider 를 HS256 전용 HMAC 구현으로 설치한다.
+///
+/// 앱 초기화 경로와 JWT helper 들에서 호출해도 안전하도록 한 번만 설치한다.
+pub fn install_jwt_hmac_provider() {
+    JWT_HMAC_PROVIDER_INIT.get_or_init(|| {
+        let _ = JWT_HMAC_PROVIDER.install_default();
+    });
+}
+
+fn jwt_hmac_signer_factory(
+    algorithm: &Algorithm,
+    encoding_key: &EncodingKey,
+) -> JwtResult<Box<dyn JwtSigner>> {
+    match algorithm {
+        Algorithm::HS256 => Ok(Box::new(Hs256Signer::new(encoding_key)?) as Box<dyn JwtSigner>),
+        _ => Err(ErrorKind::InvalidAlgorithm.into()),
+    }
+}
+
+fn jwt_hmac_verifier_factory(
+    algorithm: &Algorithm,
+    decoding_key: &DecodingKey,
+) -> JwtResult<Box<dyn JwtVerifier>> {
+    match algorithm {
+        Algorithm::HS256 => Ok(Box::new(Hs256Verifier::new(decoding_key)?) as Box<dyn JwtVerifier>),
+        _ => Err(ErrorKind::InvalidAlgorithm.into()),
+    }
+}
+
+struct Hs256Signer(HmacSha256);
+
+impl Hs256Signer {
+    fn new(encoding_key: &EncodingKey) -> JwtResult<Self> {
+        let inner = HmacSha256::new(hmac::HMAC_SHA256, encoding_key.try_get_hmac_secret()?);
+        Ok(Self(inner))
+    }
+}
+
+impl Signer<Vec<u8>> for Hs256Signer {
+    fn try_sign(&self, msg: &[u8]) -> std::result::Result<Vec<u8>, jsonwebtoken::signature::Error> {
+        Ok(hmac::sign(&self.0, msg).as_ref().to_vec())
+    }
+}
+
+impl JwtSigner for Hs256Signer {
+    fn algorithm(&self) -> Algorithm {
+        Algorithm::HS256
+    }
+}
+
+struct Hs256Verifier(HmacSha256);
+
+impl Hs256Verifier {
+    fn new(decoding_key: &DecodingKey) -> JwtResult<Self> {
+        let inner = HmacSha256::new(hmac::HMAC_SHA256, decoding_key.try_get_hmac_secret()?);
+        Ok(Self(inner))
+    }
+}
+
+impl Verifier<Vec<u8>> for Hs256Verifier {
+    fn verify(
+        &self,
+        msg: &[u8],
+        signature: &Vec<u8>,
+    ) -> std::result::Result<(), jsonwebtoken::signature::Error> {
+        hmac::verify(&self.0, msg, signature.as_slice())
+            .map_err(|_| jsonwebtoken::signature::Error::new())
+    }
+}
+
+impl JwtVerifier for Hs256Verifier {
+    fn algorithm(&self) -> Algorithm {
+        Algorithm::HS256
+    }
+}
 
 /// `/skill/` 인증 토큰. 상수 시간 비교로 안전하게 검증한다.
 ///
@@ -95,6 +186,8 @@ pub struct IssueUserTokenInput<'a> {
 /// - `HDMealError::Internal` — `secret` 가 빈 문자열인 경우.
 /// - `jsonwebtoken::Error` — 인코딩 실패 (극히 드묾).
 pub fn issue_user_token(input: IssueUserTokenInput<'_>) -> HDMealResult<String> {
+    install_jwt_hmac_provider();
+
     if input.secret.is_empty() {
         return Err(HDMealError::internal("JWT secret is empty"));
     }
@@ -133,6 +226,8 @@ pub struct ValidateUserTokenInput<'a> {
 /// - `HDMealError::Unauthorized` — 빈 secret, 서명 불일치, 만료, `sub != uid`.
 /// - `HDMealError::Forbidden` — scope 부족.
 pub fn validate_user_token(input: ValidateUserTokenInput<'_>) -> HDMealResult<UserTokenClaims> {
+    install_jwt_hmac_provider();
+
     if input.secret.trim().is_empty() {
         return Err(HDMealError::unauthorized("올바르지 않은 토큰입니다."));
     }
@@ -187,6 +282,8 @@ mod tests {
 
     #[test]
     fn jwt_round_trip() {
+        install_jwt_hmac_provider();
+
         let secret = "test-secret";
         let req_id = crate::shared::context::new_request_id();
         let token = issue_user_token(IssueUserTokenInput {
@@ -210,6 +307,8 @@ mod tests {
 
     #[test]
     fn jwt_rejects_wrong_scope() {
+        install_jwt_hmac_provider();
+
         let secret = "test-secret";
         let req_id = crate::shared::context::new_request_id();
         let token = issue_user_token(IssueUserTokenInput {
@@ -231,6 +330,8 @@ mod tests {
 
     #[test]
     fn jwt_rejects_bad_signature() {
+        install_jwt_hmac_provider();
+
         let req_id = crate::shared::context::new_request_id();
         let token = issue_user_token(IssueUserTokenInput {
             secret: "secret-1",
@@ -251,6 +352,8 @@ mod tests {
 
     #[test]
     fn jwt_accepts_nbf_within_leeway() {
+        install_jwt_hmac_provider();
+
         let secret = "test-secret";
         let now = Utc::now().timestamp();
         let claims = UserTokenClaims {
@@ -281,6 +384,8 @@ mod tests {
 
     #[test]
     fn jwt_rejects_nbf_beyond_leeway() {
+        install_jwt_hmac_provider();
+
         let secret = "test-secret";
         let now = Utc::now().timestamp();
         let claims = UserTokenClaims {

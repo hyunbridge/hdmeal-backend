@@ -23,6 +23,7 @@ pub async fn run() -> anyhow::Result<()> {
     // reqwest `rustls-no-provider` 와 OTLP gRPC exporter 가 process-wide provider 를
     // 기대하므로, observability::init 보다 먼저 설치합니다.
     tls::install_rustls_ring_provider();
+    crate::shared::security::install_jwt_hmac_provider();
 
     let config = AppConfig::from_env()?;
     observability::init(&config.app_name, config.otel_endpoint.as_deref())?;
