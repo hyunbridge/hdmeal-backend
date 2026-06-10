@@ -42,7 +42,11 @@ RUN case "$TARGETARCH" in \
     echo "Building deps for $TARGETARCH with RUSTFLAGS=\"$RUSTFLAGS\"" && \
     mkdir -p src && echo "fn main(){}" > src/main.rs && echo "" > src/lib.rs \
     && CARGO_TARGET_DIR=/app/target RUSTFLAGS="$RUSTFLAGS" cargo build --release --locked --bin hdmeal-backend \
-    && rm -rf /app/target/release/deps/hdmeal_backend* /app/target/release/hdmeal-backend*
+    && rm -rf \
+        /app/target/release/.fingerprint/hdmeal-backend-* \
+        /app/target/release/deps/hdmeal_backend* \
+        /app/target/release/deps/libhdmeal_backend* \
+        /app/target/release/hdmeal-backend*
 
 # 실제 소스 빌드
 COPY src ./src
