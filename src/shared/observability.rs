@@ -218,11 +218,11 @@ where
 {
     type Rejection = std::convert::Infallible;
 
-    fn from_request_parts(
+    async fn from_request_parts(
         parts: &mut axum::http::request::Parts,
         _state: &S,
-    ) -> impl std::future::Future<Output = Result<Self, Self::Rejection>> + Send {
-        async move { Ok(build_http_request_context(&parts.headers)) }
+    ) -> Result<Self, Self::Rejection> {
+        Ok(build_http_request_context(&parts.headers))
     }
 }
 

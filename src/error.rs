@@ -201,6 +201,8 @@ mod tests {
     #[test]
     fn http_error_maps_to_service_unavailable() {
         use tokio::runtime::Runtime;
+        crate::shared::tls::install_rustls_ring_provider();
+
         let rt = Runtime::new().unwrap();
         let err = rt.block_on(async {
             let client = reqwest::Client::builder().build().unwrap();
@@ -215,7 +217,7 @@ mod tests {
 
     #[test]
     fn io_error_maps_to_internal() {
-        let e = HDMealError::Io(std::io::Error::new(std::io::ErrorKind::Other, "io fail"));
+        let e = HDMealError::Io(std::io::Error::other("io fail"));
         assert_eq!(e.status(), StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(e.public_message(), "서버 오류가 발생했습니다");
     }

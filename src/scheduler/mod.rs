@@ -149,8 +149,7 @@ mod tests {
         let gap = log[1].saturating_sub(log[0]);
         assert!(
             gap >= Duration::from_millis(95),
-            "second tick fired too soon after initial: gap={:?} (log={log:?})",
-            gap
+            "second tick fired too soon after initial: gap={gap:?} (log={log:?})"
         );
     }
 }

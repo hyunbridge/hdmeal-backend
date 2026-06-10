@@ -34,10 +34,7 @@ pub async fn handle_briefing(
     let weekday = target_date.weekday();
 
     if matches!(weekday, Weekday::Sat | Weekday::Sun) {
-        return Ok(vec![Message::Text(format!(
-            "{}은 주말 입니다.",
-            date_label
-        ))]);
+        return Ok(vec![Message::Text(format!("{date_label}은 주말 입니다."))]);
     }
 
     let user = svc.users.ensure_user(platform, external_id).await?;
@@ -176,7 +173,7 @@ pub async fn handle_timetable(
                 thumbnail_url: None,
                 buttons: vec![CardButton::Message {
                     title: "네, 저장해 주세요.".to_string(),
-                    postback: Some(format!("사용자 정보 등록: {}학년 {}반", grade, class)),
+                    postback: Some(format!("사용자 정보 등록: {grade}학년 {class}반")),
                 }],
             }),
         ]);

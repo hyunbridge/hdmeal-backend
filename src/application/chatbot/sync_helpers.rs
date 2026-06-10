@@ -182,7 +182,7 @@ fn water_temperature_document_from_reading(
 ) -> WaterTemperatureDocument {
     WaterTemperatureDocument {
         id: format!("water-{}", reading.timestamp.timestamp()),
-        timestamp: reading.timestamp.clone(),
+        timestamp: reading.timestamp,
         temperature_c: reading.temperature_c,
         created_at: Utc::now(),
     }

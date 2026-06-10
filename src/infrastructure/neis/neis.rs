@@ -318,7 +318,7 @@ impl NeisClient {
             let c = class_no.to_string();
             let inner = lessons.entry(g).or_default();
             let arr = inner.entry(c).or_default();
-            let idx = perio.saturating_sub(1) as usize;
+            let idx = perio.saturating_sub(1);
             arr.resize(idx + 1, String::new());
             arr[idx] = subject;
         }

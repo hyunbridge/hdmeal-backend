@@ -64,8 +64,7 @@ pub async fn handle_meal(
             .unwrap_or_default();
         if !schedule_text.is_empty() {
             return Ok(vec![Message::Text(format!(
-                "급식을 실시하지 않습니다. ({})",
-                schedule_text
+                "급식을 실시하지 않습니다. ({schedule_text})"
             ))]);
         }
         return Ok(vec![Message::Text("등록된 데이터가 없습니다.".to_string())]);
@@ -167,12 +166,10 @@ pub async fn handle_schedule(
         };
         let notice = if (to - from).num_days() > 90 {
             format!(
-                "서버 성능상의 이유로 최대 90일까지만 조회가 가능합니다.\n조회기간이 {}부터 {}까지로 제한되었습니다.\n\n",
-                from,
-                effective_end
+                "서버 성능상의 이유로 최대 90일까지만 조회가 가능합니다.\n조회기간이 {from}부터 {effective_end}까지로 제한되었습니다.\n\n",
             )
         } else {
-            format!("{}부터 {}까지 조회합니다.\n\n", from, effective_end)
+            format!("{from}부터 {effective_end}까지 조회합니다.\n\n")
         };
         let _ = svc
             .ingestion
