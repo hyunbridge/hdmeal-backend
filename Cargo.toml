@@ -30,7 +30,7 @@ axum = { version = "0.8", default-features = false, features = [
 tower = { version = "0.5", default-features = false, features = ["util"] }
 # tower-http: CorsLayer, RequestBodyLimitLayer, SetResponseHeaderLayer 만 활성화.
 # `default-features = false` 로 compression/trace(완전형) / fs 등 미사용 모듈 차단.
-tower-http = { version = "0.6", default-features = false, features = [
+tower-http = { version = "0.7", default-features = false, features = [
     "cors",
     "limit",
     "set-header",
